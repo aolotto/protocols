@@ -5,7 +5,7 @@ local json = require("json")
 
 -- data structures of initialization
 local initial_user = {
-  div = 0, -- total dividends
+  div = { 0, 0, 0 }, -- unpay, total dividends,paid
   bet = { 0, 0, 0 }, -- bets: {counts,amount,tickets}
   mint = 0, -- total mint
   win = { 0, 0, 0 }, -- wins: {balance, increased, decreased}
@@ -477,3 +477,46 @@ end)
 
 
 -- dividends
+Handlers.add("distribute-dividends",{
+  From = function (_from) return _from == POOL_ID end,
+  Action = "Distribute-Dividends"
+},function(msg)
+  local dividends = utils.deepCopy(State.dividends)
+  local funds = Funds[DEFAULT_PAY_TOKEN_ID]
+  assert(funds >= dividends[1],"the actual token amount is less than the dividend amount")
+  local _unit = dividends[1] /  utils.toNumber(TotalSupply)
+  local unpay = {}
+  local _addresses = 0
+  for uid, value in pairs(Balances) do
+    if not Players[uid] then Players[uid] = initial_user end
+    _addresses = _addresses + 1
+    local _amount = _unit * utils.toNumber(value)
+    utils.increase(Players[uid].div,{_amount,_amount,0})
+    utils.decrease(State.dividends,{_amount,0,-_amount})
+    if Players[uid].div[1] >= 1000000 then
+      unpay[uid] = math.floor(Players[uid].div[1])
+    end
+  end
+
+  msg.reply({
+    Action = "Distributed-Dividends",
+    Amount = tostring(dividends[1]),
+    Addresses = tostring(_addresses),
+    Data = State.dividends
+  })
+
+  for uid, value in pairs(unpay) do
+    Send({
+      Target = DEFAULT_PAY_TOKEN_ID,
+      Action = "Transfer",
+      Recipient = uid,
+      Quantity = string.format("%.0f",value),
+      ['X-Transfer-Type'] = "Distributed"
+    }).onReply(function (m)
+      local _amount = utils.toNumber(m.Quantity)
+      utils.decrease(Players[m.Recipient].div,{_amount,0,-_amount})
+      Funds[m.From] = Funds[m.From] - _amount
+    end)
+  end
+
+end)

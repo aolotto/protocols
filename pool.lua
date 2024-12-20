@@ -409,7 +409,7 @@ Handlers.distribute = function()
     Amount = tostring(dividends_bal),
     Data = Dividends
   }).onReply(function (m)
-    Dividends = m.Data.dividends
+    Dividends = m.Data
   end)
 end
 
