@@ -1,5 +1,29 @@
 local utils = require(".utils")
 local crypto = require(".crypto")
+local bint = require('.bint')(256)
+
+
+utils.add = function(a, b)
+  return tostring(bint(a) + bint(b))
+end
+utils.subtract = function(a, b)
+  return tostring(bint(a) - bint(b))
+end
+utils.multiply = function(a, b)
+  return string.format("%.f",bint(a) * bint(b))
+end
+utils.divide = function(a, b)
+  return string.format("%.f",bint(a) / bint(b))
+end
+utils.divisible = function(a,b)
+  return string.format("%.0f",bint.tonumber(a) // bint.tonumber(b))
+end
+utils.toBalanceValue = function(a)
+  return string.format("%.0f",bint.tonumber(a))
+end
+utils.toNumber = function(a)
+  return bint.tonumber(a)
+end
 
 utils.parseNumberStringToBets = function(str,len)
   local bets = {}
@@ -127,6 +151,38 @@ end
 utils.getMd4Digests = function(str)
   local str = crypto.utils.stream.fromString(str or "aototto")
   return crypto.digest.md4(str).asHex()
+end
+
+
+utils.updateRanking = function(tbl, k, v, len)
+  -- Check if uid already exists
+  local found = false
+  for i, entry in ipairs(tbl) do
+      if entry[k] then
+          -- If found, update the score
+          entry[k] = v
+          found = true
+          break
+      end
+  end
+  
+  -- If uid not in table, insert new entry
+  if not found then
+      table.insert(tbl, { [k] = v })
+  end
+
+  -- Sort by score from high to low
+  table.sort(tbl, function(a, b)
+      local a_v = next(a) and a[next(a)] or 0
+      local b_v = next(b) and b[next(b)] or 0
+      return a_v > b_v
+  end)
+
+  -- Keep only top 20 records in ranking
+  local _len = len or 20
+  while #tbl > _len do
+      table.remove(tbl, #tbl)  -- Remove last entry
+  end
 end
 
 

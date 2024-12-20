@@ -61,13 +61,13 @@ local utils = {
 Variant = "0.0.3"
 
 -- token should be idempotent and not change previous state updates
-Denomination = Denomination or 12
-Balances = Balances or { [ao.id] = utils.toBalanceValue(63000000 * 10 ^ Denomination) }
-TotalSupply = TotalSupply or utils.toBalanceValue(63000000 * 10 ^ Denomination)
-Name = Name or 'Aolotto Dao Token'
-Ticker = Ticker or 'LOTTO'
-Logo = Logo or '3u9Hr7xL02QjVikyY7i3o7ZiRMdoJqr3eQDzT6SOz1s'
-Holders = Holders or "1"
+Denomination = Denomination or '<DENOMINATION>'
+Balances = Balances or { [ao.id] = utils.toBalanceValue(0 * 10 ^ Denomination) }
+TotalSupply = TotalSupply or utils.toBalanceValue(0 * 10 ^ Denomination)
+Name = Name or '<NAME>'
+Ticker = Ticker or '<TICKER>'
+Logo = Logo or '<LOGO>'
+Holders = Holders or "0"
 
 --[[
      Add handlers for each incoming Action defined by the ao Standard Token Specification
@@ -251,10 +251,7 @@ end)
 
 
 Handlers.add('holders',"Holders",function(msg)
-  msg.reply({Holders=Holders})
+  msg.reply({Holders=Holders,Data=Holders})
 end)
 
 
-Handlers.test = function(Q)
-  if Holders then Holders = utils.add(Holders,bint(Q)>0 and 1 or 0) end
-end
