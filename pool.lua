@@ -406,9 +406,8 @@ Handlers.distribute = function()
   Send({
     Target = AGENT,
     Action = "Distribute-Dividends",
-    Amount = tostring(dividends_bal),
-    Data = Dividends
   }).onReply(function (m)
+    print("distributed:"..m.Amount.."-"..m.Id)
     Dividends = m.Data
   end)
 end

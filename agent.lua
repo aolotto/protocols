@@ -1,7 +1,4 @@
 local utils = require("modules.utils")
-local crypto = require(".crypto")
-local bint = require('.bint')(256)
-local json = require("json")
 
 -- data structures of initialization
 local initial_user = {
@@ -33,6 +30,7 @@ local initial_stats = {
   dividends = {0,0,0},
   buybacks = {0,0,0},
   total_burned = 0,
+  total_distributed = 0,
   total_taxation = 0
 }
 
@@ -153,6 +151,7 @@ Handlers.add("bet2mint",{
   From = function (_from)
     return DEFAULT_PAY_TOKEN_ID == _from
   end,
+  Sender = function (_sender) return _sender ~= Owner and _sender ~= ao.id end,
   Quantity = function(_quantity,m)
     local id = POOL_ID or m['X-Pool']
     local price = SyncedInfo[id].Price
@@ -215,10 +214,10 @@ end)
 
 -- facucet
 Handlers.add("add_faucet_quota",{
-  From = function (_from) return _from == FAUCET_ID end,
+  From = function (_from) return _from == FAUCET_ID and _from ~= ao.id end,
   Action = "Add-Faucet-Quota",
-  Account = "_",
-  Quantity = "%d+"
+  Quantity = "%d+",
+  Account = function (_account) return _account ~= Owner and #_account == 43 and _account ~= ao.id end
 },function (msg)
   local uid = msg.Account
   local qty = math.min(utils.toNumber(msg.Quantity),2100000000000000)
@@ -227,6 +226,7 @@ Handlers.add("add_faucet_quota",{
     utils.increase(Stats,{total_players=1})
   end
   utils.increase(Players[uid].faucet,{qty,qty})
+  utils.increase(Stats,{total_faucet_account=1})
   msg.reply({
     Action="Faucet-Quota-Added",
     User = msg.User,
@@ -329,7 +329,11 @@ local function doClaim(claim)
     ['Pushed-For'] = claim.id,
   })
 end
-Handlers.add("claim","Claim",function(msg)
+Handlers.add("claim",{
+  Action = "Claim",
+  From = function (_from) return _from ~= ao.id end,
+  Owner = function (_owner) return _owner ~= Owner end,
+},function(msg)
   assert(type(DEFAULT_PAY_TOKEN_ID) =="string" and #DEFAULT_PAY_TOKEN_ID==43,"missed payment token defination")
   local player = Players[msg.From]
   local _rate = SyncedInfo[POOL_ID]['Tax-Rate'] and tonumber(SyncedInfo[POOL_ID]['Tax-Rate']) or 0.4
@@ -481,42 +485,62 @@ Handlers.add("distribute-dividends",{
   From = function (_from) return _from == POOL_ID end,
   Action = "Distribute-Dividends"
 },function(msg)
-  local dividends = utils.deepCopy(State.dividends)
-  local funds = Funds[DEFAULT_PAY_TOKEN_ID]
-  assert(funds >= dividends[1],"the actual token amount is less than the dividend amount")
-  local _unit = dividends[1] /  utils.toNumber(TotalSupply)
+  local dividends = utils.deepCopy(Stats.dividends)
+  local fund = Funds[DEFAULT_PAY_TOKEN_ID]
+  local _supply = utils.toNumber(TotalSupply)
+  assert(fund >= dividends[1],"the actual token amount is less than the dividend amount")
+  assert(_supply > 0, "no holders")
+  local _unit = dividends[1] /  _supply
   local unpay = {}
   local _addresses = 0
   for uid, value in pairs(Balances) do
-    if not Players[uid] then Players[uid] = initial_user end
-    _addresses = _addresses + 1
-    local _amount = _unit * utils.toNumber(value)
-    utils.increase(Players[uid].div,{_amount,_amount,0})
-    utils.decrease(State.dividends,{_amount,0,-_amount})
-    if Players[uid].div[1] >= 1000000 then
-      unpay[uid] = math.floor(Players[uid].div[1])
+    if utils.toNumber(value) > 0 and uid ~= Owner then
+      if not Players[uid] then Players[uid] = initial_user end
+      _addresses = _addresses + 1
+      local _amount = _unit * utils.toNumber(value)
+      utils.increase(Players[uid].div,{_amount,_amount,0})
+      utils.decrease(Stats.dividends,{_amount,0,-_amount})
+      if Players[uid].div[1] >= 1000000 then
+        unpay[uid] = math.floor(Players[uid].div[1])
+      end
     end
   end
 
+  utils.increase(Stats,{total_distributed=1})
+  local no = tostring(Stats.total_distributed)
   msg.reply({
     Action = "Distributed-Dividends",
     Amount = tostring(dividends[1]),
     Addresses = tostring(_addresses),
-    Data = State.dividends
+    Supply = tostring(_supply),
+    ['Distributed-No'] = no,
+    Data = Stats.dividends
   })
 
-  for uid, value in pairs(unpay) do
+  for _recipient, _qty in pairs(unpay) do
+    Handlers.once("once_disributed_".._recipient.."_"..no,{
+      From = DEFAULT_PAY_TOKEN_ID,
+      Action = "Debit-Notice",
+      ['X-Transfer-Type'] = "Distributed",
+      ['X-Distributed-No'] = no,
+      ['X-Supply'] = tostring(_supply),
+      Recipient = _recipient,
+      Quantity = string.format("%.0f",_qty)
+    },function (msg)
+      local _amount = utils.toNumber(msg.Quantity)
+      utils.decrease(Players[msg.Recipient].div,{_amount,0,-_amount})
+      Funds[msg.From] = Funds[msg.From] - _amount
+    end)
     Send({
       Target = DEFAULT_PAY_TOKEN_ID,
       Action = "Transfer",
-      Recipient = uid,
-      Quantity = string.format("%.0f",value),
-      ['X-Transfer-Type'] = "Distributed"
-    }).onReply(function (m)
-      local _amount = utils.toNumber(m.Quantity)
-      utils.decrease(Players[m.Recipient].div,{_amount,0,-_amount})
-      Funds[m.From] = Funds[m.From] - _amount
-    end)
+      Recipient = _recipient,
+      Quantity = string.format("%.0f",_qty),
+      ['X-Transfer-Type'] = "Distributed",
+      ['X-Dividends-Total'] = tostring(dividends[1]),
+      ['X-Addresses'] = tostring(_addresses),
+      ['X-Supply'] = tostring(_supply),
+      ['X-Distributed-No'] = no,
+    })
   end
-
 end)

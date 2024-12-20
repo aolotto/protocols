@@ -16,7 +16,7 @@ Handlers.add("share",{
     return Members[_user] == nil or Members[_user].getted == 0
   end,
   Account = function(_account)
-    return #_account == 43
+    return #_account == 43 and _account~= Manager and _account~= Owner
   end
 },function(msg)
   local member = Members[msg.User]
