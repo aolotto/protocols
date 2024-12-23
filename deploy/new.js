@@ -69,6 +69,8 @@ inquirer
     
     let {name,dev,paytoken_pid,agent_pid,pool_pid,faucet_pid,buyback_pid,fundation_pid} = answers
 
+    console.log("Deploying ...")
+
     // deploy PAY
     if(paytoken_pid.length !== 43){
       const pay = await ao.deploy({
@@ -106,6 +108,13 @@ inquirer
       console.log("- Spawned AGENT process: "+agent.pid)
       agent_pid = agent.pid
       await ao.wait(agent.pid)
+    } else {
+      const l_token = await ao.load({ data: src_token[0], fills : {NAME: "AoLottoToken", TICKER: "ALT", DENOMINATION: 12, LOGO:token_logos[0] }, pid: agent_pid })
+      if(l_token.err){throw(l_token.err)}
+      console.log("- Loaded token token.lua to AGENT : ",l_token?.mid)
+      const l_agent = await ao.load({ data: src_agent[0], fills :{DEFAULT_PAY_TOKEN_ID: paytoken_pid} , pid: agent_pid })
+      if(l_agent.err){throw(l_agent.err)}
+      console.log("- Loaded token agent.lua to AGENT : ",l_agent?.mid)
     }
     // deploy FAUCET
     if(agent_pid.length == 43 && faucet_pid.length !== 43){
@@ -122,6 +131,10 @@ inquirer
       console.log("- Spawned FAUCET process: "+faucet.pid)
       faucet_pid = faucet.pid
       await ao.wait(faucet.pid)
+    }else{ 
+      const { err, res, mid } = await ao.eval({ pid : faucet_pid, data : src_faucet[0], fills : {AGENT : agent_pid}})
+      if(err)throw(err)
+      console.log("- Loaded token faucet.lua to FAUCET : ",mid)
     }
 
     // deploy POOL
@@ -141,6 +154,10 @@ inquirer
       console.log("- Spawned POOL process: "+pool.pid)
       pool_pid = pool.pid
       await ao.wait(pool.pid)
+    }else{
+      const { err, res, mid } = await ao.eval({ pid : pool_pid, data : src_pool[0], fills : {AGENT : agent_pid}})
+      if(err)throw(err)
+      console.log("- Loaded token pool.lua to POOL : ",mid)
     }
 
     // deploy BUYBACK
@@ -158,6 +175,10 @@ inquirer
       console.log("- Spawned BUYBACK process: "+buyback.pid)
       buyback_pid = buyback.pid
       await ao.wait(buyback.pid)
+    }else{
+      const { err, res, mid } = await ao.eval({ pid : buyback_pid, data : src_buyback[0], fills : {AGENT : agent_pid}})
+      if(err)throw(err)
+      console.log("- Loaded token buyback.lua to BUYBACK : ",mid)
     }
 
     // deploy FUNDATION
@@ -175,6 +196,10 @@ inquirer
       console.log("- Spawned FUNDATION process: "+fundation.pid)
       fundation_pid = fundation.pid
       await ao.wait(fundation.pid)
+    }else{
+      const { err, res, mid } = await ao.eval({ pid : fundation_pid, data : src_fundation[0], fills : {AGENT : agent_pid}})
+      if(err)throw(err)
+      console.log("- Loaded token fundation.lua to FUNDATION : ",mid)
     }
 
     // save process IDs
@@ -186,9 +211,7 @@ inquirer
     }
 
      // push those IDs to AGENT
-     const e1 = await ao.eval({ 
-      pid: agent_pid, 
-      data: `
+     const data = `
         DEFAULT_PAY_TOKEN_ID = "${paytoken_pid}"
         FUNDATION_ID = "${fundation_pid}"
         FAUCET_ID = "${faucet_pid}"
@@ -203,10 +226,14 @@ inquirer
           "${buyback_pid}"
         })
       `  
+      // console.log("- Pushing those process IDs to AGENT",data)
+     const e1 = await ao.eval({ 
+      pid: agent_pid, 
+      data: data,
     })
 
     if(e1.err){throw(e1.err)}
-    console.log("- All the processes linked to AGENT : ",e1.mid)
+    console.log("- All the processes linked to AGENT : ",e1.mid)    
     
   })
   .catch((error) => {

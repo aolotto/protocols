@@ -53,7 +53,7 @@ PER_MINT_BASE_RATE = PER_MINT_BASE_RATE or "0.001"
 -- global tables
 Quota = Quota or {0,0} -- {balance, initial}
 Players = Players or {}
-Stats = Stats or initial_stats
+Stats = Stats or utils.deepCopy(initial_stats)
 Funds = Funds or {}
 Winners = Winners or {}
 -- Pools = Pools or {}
@@ -68,8 +68,9 @@ SyncedInfo = SyncedInfo or {}
 
 -- bet_to_mint
 local function countBets(uid,quantity,pool)
+  assert(type(uid)=="string","Missed user id")
   if not Players[uid] then 
-    Players[uid] = initial_user 
+    Players[uid] = utils.deepCopy(initial_user)
     utils.increase(Stats,{total_players=1})
   end
   local _tax_rate = pool and tonumber(pool['Tax-Rate']) or 0.4
@@ -102,7 +103,7 @@ local function Mint(count,uid)
   assert(type(uid)=="string","Missed user id")
   assert(tonumber(count)>=1,"Missed count")
   if not Players[uid] then 
-    Players[uid] = initial_user 
+    Players[uid] = utils.deepCopy(initial_user)
     utils.increase(Stats,{total_players=1})
   end
   local _count = utils.toNumber(count)
@@ -132,16 +133,20 @@ local function Mint(count,uid)
   -- Increase total supply
   TotalSupply = utils.add(TotalSupply,total_minted)
   -- Increase user balance
-  if not Balances[uid] then Balances[uid] = "0" end
+  if not Balances[uid] then 
+    Balances[uid] = "0"
+  end
   Balances[uid] = utils.add(Balances[uid], user_minted)
   -- Increase fundation balance
   local _fundation = FUNDATION_ID or ao.id
-  if not Balances[_fundation] then Balances[_fundation] = "0" end
+  if not Balances[_fundation] then 
+    Balances[_fundation] = "0"
+  end
   Balances[_fundation] = utils.add(Balances[_fundation], fundation_minted)
   -- updating rankings
   utils.updateRanking(TopMintings,uid,Players[uid].mint,50) -- update rankings
   -- return minted result
-  return total_minted, user_minted, fundation_minted, tostring(_speed), tostring(_unit), tostring(_MINT_TAX), _faucet_buff>0 and tostring(_faucet_buff)
+  return total_minted, user_minted, fundation_minted, tostring(_speed), tostring(_unit), tostring(_MINT_TAX), _faucet_buff>0 and tostring(_faucet_buff) or nil
 end
 
 
@@ -164,8 +169,9 @@ Handlers.add("bet2mint",{
   utils.increase(Funds,{[_pay_token_id]=utils.toNumber(msg.Quantity)})
   local _pool_id = msg['X-Pool'] or POOL_ID
   local _pool = SyncedInfo[_pool_id]
-  local _player = msg['X-Player'] or msg.Sender
+  local _player = msg['X-Beneficiary'] or msg.Sender
   local _minter = msg.Sender
+
   local _count,_amount,_tax = countBets(_player, msg.Quantity, _pool)
   local _message = {
     Action = "Save-Ticket",
@@ -173,9 +179,14 @@ Handlers.add("bet2mint",{
     Amount = tostring(_amount),
     Tax = tostring(_tax),
     Price = _pool.Price,
-    Player = msg['X-Player'] or msg.Sender,
+    Player = _player
   }
-  if Quota[2]==0 and utils.toNumber(TotalSupply)==0 then resetQuota() end -- minting begining by the first bet
+
+  if Quota[2]==0 and utils.toNumber(TotalSupply)==0 then 
+    resetQuota() 
+    print("Quota reseted")
+  end -- minting begining by the first bet
+
   local mint = nil
   if Quota[1]>0 or Players[_minter].faucet[1]>0 then
    
@@ -193,8 +204,15 @@ Handlers.add("bet2mint",{
         token = ao.id,
         denomination = Denomination
       }
-      _message.Mint = mint.total
     end
+
+    _message.Mint = ao.id
+    _message['Mint-Total'] = _minted
+    _message['Mint-Buff'] = _mint_buff
+    _message['Mint-Speed'] = _speed
+    _message['Mint-Amount'] = _user_minted
+    _message['Mint-Fundation'] = _fundation_minted
+    _message['Mint-For'] = _minter
   end
   _message.Data = {
     token = {
@@ -202,13 +220,16 @@ Handlers.add("bet2mint",{
       ticker = SyncedInfo[_pay_token_id].Ticker,
       denomination = SyncedInfo[_pay_token_id].Denomination
     },
-    mint = mint,
-    quota = Quota,
+    minted = mint,
+    minting = {
+      quota = Quota,
+      max_mint = MAX_MINT,
+      minted = TotalSupply
+    },
     sponsor = _player ~= msg.Sender and Sponsors[msg.Sender] or nil
   }
   msg.forward(_pool_id,_message)
 end)
-
 
 
 
@@ -222,7 +243,7 @@ Handlers.add("add_faucet_quota",{
   local uid = msg.Account
   local qty = math.min(utils.toNumber(msg.Quantity),2100000000000000)
   if not Players[uid] then 
-    Players[uid] = initial_user 
+    Players[uid] = utils.deepCopy(initial_user) 
     utils.increase(Stats,{total_players=1})
   end
   utils.increase(Players[uid].faucet,{qty,qty})
@@ -244,10 +265,6 @@ Handlers.add("get-player",{
   msg.reply({Data = Players[msg.Player]})
 end)
 
-Handlers.add("get-pool","Get-Pool",function (msg)
-  msg.reply({Data=POOL_ID and SyncedInfo[POOL_ID]})
-end)
-
 Handlers.add("ranks","Ranks",function(msg)
   local ranks = {
     bettings = TopBettings,
@@ -256,6 +273,34 @@ Handlers.add("ranks","Ranks",function(msg)
     dividends = TopDividends
   }
   msg.reply({ Data=ranks})
+end)
+
+Handlers.add("stats","Stats",function(msg)
+  local stats = Stats
+  stats.total_supply = TotalSupply
+  msg.reply({Data=stats})
+end)
+
+Handlers.add("protocols","Protocols",function (msg)
+  local details = SyncedInfo
+  details[ao.id] = {
+    Id = ao.id,
+    Ticker = Ticker,
+    Denomination = Denomination,
+    Logo = Logo
+  }
+  msg.reply({
+    Data = {
+      agent_id = ao.id,
+      pay_id = DEFAULT_PAY_TOKEN_ID,
+      pool_id = POOL_ID,
+      facuet_id = FAUCET_ID,
+      fundation_id = FUNDATION_ID,
+      buybacks_id = BUYBACK_ID,
+      owner_id = Owner,
+      details = details
+    }
+  })
 end)
 
 
@@ -376,7 +421,11 @@ Handlers.add("archive",{
     Round = msg.Round,
     ['Archive-Id'] = msg.Id,
     Data = {
-      quota = Quota,
+      minting = {
+        quota = Quota,
+        max_mint = MAX_MINT,
+        minted = TotalSupply
+      },
       token = {
         id = SyncedInfo[DEFAULT_PAY_TOKEN_ID].Id,
         ticker = SyncedInfo[DEFAULT_PAY_TOKEN_ID].Ticker,
@@ -495,7 +544,7 @@ Handlers.add("distribute-dividends",{
   local _addresses = 0
   for uid, value in pairs(Balances) do
     if utils.toNumber(value) > 0 and uid ~= Owner then
-      if not Players[uid] then Players[uid] = initial_user end
+      if not Players[uid] then Players[uid] = utils.deepCopy(initial_user) end
       _addresses = _addresses + 1
       local _amount = _unit * utils.toNumber(value)
       utils.increase(Players[uid].div,{_amount,_amount,0})

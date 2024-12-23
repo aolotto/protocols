@@ -17,7 +17,11 @@ local initial_state = {
   ts_round_end = 0,
   run = 1,
   wager_limit = 1000000000,
-  minting = {0,0}
+  minting = {
+    quota = {378000000000000000,378000000000000000},
+    max_mint = "210000000000000000000",
+    minted = "0"
+  }
 }
 
 
@@ -37,7 +41,7 @@ DIVDIDEND_LIMIT = DIVDIDEND_LIMIT or 1000000000
 
 
 Bets = Bets or {}
-State = State or initial_state
+State = State or utils.deepCopy(initial_state)
 Numbers = Numbers or {}
 Draws = Draws or {}
 Taxation = Taxation or {0,0,0}
@@ -74,7 +78,7 @@ Handlers.add("save-ticket",{
   utils.increase(State,{jackpot = amount * JACKPOT_SCALE, balance = amount})
   utils.update(State,{
     ts_latest_bet = tonumber(msg.Timestamp),
-    minting = msg.Data.quota,
+    minting = msg.Data.minting,
   })
 
 
@@ -94,7 +98,7 @@ Handlers.add("save-ticket",{
     player = _player_id,
     price = msg.Price,
     token = msg.Data.token,
-    mint = msg.Data.mint,
+    mint = msg.Data.minted,
     sponsor = msg.Data.sponsor
   }
   table.insert(Bets,bet)
@@ -386,7 +390,7 @@ Handlers.archive = function()
       Archive.block_height = m['Block-Height']
       Archive.time_stamp = m.Timestamp
       Archive.token = m.Data.token
-      utils.update(State,{minting = m.Data.quota})
+      utils.update(State,{minting = m.Data.minting})
       Draw(Archive)
     end)
     Send({

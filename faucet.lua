@@ -11,7 +11,9 @@ if not Available then Available = true end
 
 Handlers.add("share",{
   Action="Share",
-  From = Manager or Owner,
+  From = function (_from)
+    return _from == Manager or _from == Owner
+  end,
   User = function (_user)
     return Members[_user] == nil or Members[_user].getted == 0
   end,
