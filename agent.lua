@@ -31,7 +31,8 @@ local initial_stats = {
   buybacks = {0,0,0},
   total_burned = 0,
   total_distributed = 0,
-  total_taxation = 0
+  total_taxation = 0,
+  launch_time = 1735689601000
 }
 
 -- consts
@@ -44,10 +45,6 @@ MINT_TAX = MINT_TAX or "0.2"
 MAX_MINT = "210000000000000000000"
 BET2MINT_QUOTA_RATE = BET2MINT_QUOTA_RATE or "0.002"
 PER_MINT_BASE_RATE = PER_MINT_BASE_RATE or "0.001"
-
--- PRICE = PRICE or "1000000"
--- MAX_BET = MAX_BET or "100"
--- MIN_CLAIM = MIN_CLAIM or "100"
 
 
 -- global tables
@@ -164,6 +161,7 @@ Handlers.add("bet2mint",{
   end,
   ['X-Numbers'] = "_"
 },function (msg)
+  assert(msg.Timestamp >= Stats.launch_time or 0,"The game is not started yet")
   local _pay_token_id = msg.From
   if not Funds[_pay_token_id] then Funds[_pay_token_id] = 0 end
   utils.increase(Funds,{[_pay_token_id]=utils.toNumber(msg.Quantity)})

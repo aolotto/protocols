@@ -21,9 +21,13 @@ Handlers.add("share",{
     return #_account == 43 and _account~= Manager and _account~= Owner
   end
 },function(msg)
+  assert(Available==true,"Faucet is not available")
+  assert(not BlackList[msg.Account],"Account is in blacklist")
+  assert(Supplied < Initial_Supply,"Faucet is empty")
   local member = Members[msg.User]
+  assert(member == nil or member.getted == 0 or member.getted == nil,"You have got the quota")
   local order = #utils.keys(Members)
-  local quota = member and member.quota or string.format("%.0f",(Initial_Supply - Supplied) * 0.0001)
+  local quota = member and member.quota or string.format("%.0f",math.max((Initial_Supply - Supplied) * 0.0001,1000000000000))
   Members[msg.User] = {
     user_id = msg.User,
     user_address = msg.Account,
@@ -46,6 +50,9 @@ Handlers.add("share",{
     User = msg.User
   }).onReply(function(m)
     Members[m.User].getted = tonumber(m.Quantity)
+    if Supplied >= Initial_Supply then
+      Available = false
+    end
   end)
 
 end)
@@ -60,6 +67,17 @@ end)
 Handlers.add("info","Info",function(msg)
   msg.reply({
     Name= Name or "Aolotto-Faucet",
-    Manager = Manager
+    Manager = Manager,
+    Available = Available and "1" or "0",
+    Supplied = string.format("%.0f",Supplied),
+    Initial_Supply = string.format("%.0f",Initial_Supply),
+    Data = {
+      Members = utils.keys(Members),
+      BlackList = BlackList,
+      Manager = Manager,
+      Available = Available,
+      Supplied = Supplied,
+      Initial_Supply = Initial_Supply
+    }
   })
 end)

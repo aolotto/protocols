@@ -378,30 +378,27 @@ Handlers.archive = function()
       ts_latest_draw = 0
     })
     print("Round switch to "..State.round)
-
-    Handlers.once("_once_archive_"..Archive.state.round,{
-      From = AGENT,
-      Action = "Archived",
-      Round = tostring(Archive.state.round)
-    },function(m)
-      print("The round ["..m.Round.."] has been archived as: "..m['Archive-Id'])
-      Archive.id = m['Archive-Id']
-      Archive.archived_id = m.Id
-      Archive.block_height = m['Block-Height']
-      Archive.time_stamp = m.Timestamp
-      Archive.token = m.Data.token
-      utils.update(State,{minting = m.Data.minting})
-      Draw(Archive)
-    end)
-    Send({
-      Target = AGENT,
-      Action = "Archive",
-      Round = tostring(Archive.state.round),
-      Data = Archive.state
-    })
-  else
-    Draw(Archive)
   end
+  Handlers.once("_once_archive_"..Archive.state.round,{
+    From = AGENT,
+    Action = "Archived",
+    Round = tostring(Archive.state.round)
+  },function(m)
+    print("The round ["..m.Round.."] has been archived as: "..m['Archive-Id'])
+    Archive.id = m['Archive-Id']
+    Archive.archived_id = m.Id
+    Archive.block_height = m['Block-Height']
+    Archive.time_stamp = m.Timestamp
+    Archive.token = m.Data.token
+    utils.update(State,{minting = m.Data.minting})
+    Draw(Archive)
+  end)
+  Send({
+    Target = AGENT,
+    Action = "Archive",
+    Round = tostring(Archive.state.round),
+    Data = Archive.state
+  })
 end
 
 Handlers.distribute = function()
