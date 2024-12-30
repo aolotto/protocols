@@ -272,7 +272,7 @@ local function Draw(archive)
   local numbers = archive.numbers or Archive.numbers
   local latest_bet = bets[#bets]
   local block = drive.getBlock(archive.block_height or 1520692)
-  local seed = block.hash ..'_'..archive_id..'_'..archived_id
+  local seed = block.hash ..'_'..archive_id..'_'..archived_id.."_"..latest_bet.id.."_"..tostring(os.time())
   local lucky_number = utils.getDrawNumber(seed,DIGITS or 3)
   local jackpot = state.jackpot
 

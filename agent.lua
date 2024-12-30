@@ -106,15 +106,19 @@ local function Mint(count,uid)
   local _count = utils.toNumber(count)
   local _speed = (utils.toNumber(MAX_MINT) - utils.toNumber(TotalSupply)) / utils.toNumber(MAX_MINT)
   local _player = Players[uid]
-  local _faucet_buff = 0
-  if _player.faucet[1]>0 then
-    _faucet_buff = math.min(_player.faucet[2] * 0.01 * _count * _speed , _player.faucet[1])
-    utils.decrease(Players[uid].faucet,{_faucet_buff,0})
-  end
+  
+ 
   local _quota_balance =  Quota[1] or 0
   local _unit = math.max(_quota_balance * utils.toNumber(PER_MINT_BASE_RATE) * _speed,1)
   local _MINT_TAX = utils.toNumber(MINT_TAX) or 0.2
-  local _minted = math.min(_unit * _count,_quota_balance) + _faucet_buff
+  
+  local _minted = math.min(_unit * _count,_quota_balance)
+  local _faucet_buff = 0
+  if _player.faucet[1]>0 then
+    _faucet_buff = math.min(_player.faucet[1] ,_minted)
+    utils.decrease(Players[uid].faucet,{_faucet_buff,0})
+  end
+  _minted = _minted + _faucet_buff
   local user_minted = string.format("%.0f", _minted * (1-_MINT_TAX))
   local fundation_minted = string.format("%.0f", _minted * _MINT_TAX)
   local total_minted = utils.add(user_minted,fundation_minted)
