@@ -165,7 +165,7 @@ Handlers.add("bet2mint",{
   end,
   ['X-Numbers'] = "_"
 },function (msg)
-  assert(msg.Timestamp >= Stats.launch_time or 0,"The game is not started yet")
+  -- assert(msg.Timestamp >= Stats.launch_time or 0,"The game is not started yet")
   local _pay_token_id = msg.From
   if not Funds[_pay_token_id] then Funds[_pay_token_id] = 0 end
   utils.increase(Funds,{[_pay_token_id]=utils.toNumber(msg.Quantity)})
@@ -595,3 +595,5 @@ Handlers.add("distribute-dividends",{
     })
   end
 end)
+
+
