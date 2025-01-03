@@ -37,6 +37,7 @@ TYPE = "3D"
 TAXRATE = TAXRATE or 0.4
 WAGER_DIFFICULT = WAGER_DIFFICULT or 1.1
 DIVDIDEND_LIMIT = DIVDIDEND_LIMIT or 1000000000
+DRAW_DIFF_BLOCKHEIGHT = DRAW_DIFF_BLOCKHEIGHT or 5
 
 
 
@@ -232,7 +233,9 @@ Handlers.add("info","Info",function(msg)
 end)
 
 Handlers.add("state","State",function(msg)
-  msg.reply({ Data=State})
+  local _state = utils.deepCopy(State)
+  _state.picks = Numbers
+  msg.reply({ Data=_state})
 end)
 
 
@@ -258,21 +261,30 @@ Handlers.add("Cron",function(msg)
   if msg.Timestamp >= State.ts_latest_draw and State.ts_latest_draw > 0 and #Bets > 0 then
     Handlers.archive() -- triger to switch round
   end
-  if  Dividends[1] >= DIVDIDEND_LIMIT then
+  if Dividends[1] >= DIVDIDEND_LIMIT then
     Handlers.distribute() -- triger to distribute dividends
+  end
+  if Archive and Archive.id and Archive.archived_id and Archive.block_height then
+    if msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT then
+      Archive.drawing = true
+      Archive.draw_time = msg.Timestamp
+      Archive.draw_height = msg['Block-Height']
+      Handlers.draw(Archive) -- triger to distribute dividends
+    end
   end
 end)
 
 
-local function Draw(archive)
+Handlers.draw = function(archive)
+  local draw_time = archive.draw_time or os.time()
   local archive_id = archive.id
   local archived_id = archive.archived_id or ao.id
   local state = archive.state or Archive.state
   local bets = archive.bets or Archive.bets
   local numbers = archive.numbers or Archive.numbers
   local latest_bet = bets[#bets]
-  local block = drive.getBlock(archive.block_height or 1520692)
-  local seed = block.hash ..'_'..archive_id..'_'..archived_id.."_"..latest_bet.id.."_"..tostring(os.time())
+  local block = drive.getBlock(archive.block_height+DRAW_DIFF_BLOCKHEIGHT or archive.draw_height or 1581160)
+  local seed = block.indep_hash ..'_'..archive_id..'_'..archived_id.."_"..latest_bet.id.."_"..tostring(draw_time)
   local lucky_number = utils.getDrawNumber(seed,DIGITS or 3)
   local jackpot = state.jackpot
 
@@ -311,11 +323,15 @@ local function Draw(archive)
     reward_type = reward_type,
     created = archive.time_stamp,
     bet = state.bet,
-    block_hash = block.hash,
+    block_hash = block.indep_hash,
     taxation = taxation,
     tax_rate = tax_rate,
     token = Archive.token,
-    archived = archived_id
+    archived = archived_id,
+    latest_bet_id = latest_bet.id,
+    seed = seed,
+    draw_height = block.height,
+    draw_time = draw_time
   }
   local draw_notice = {
     Target = AGENT,
@@ -331,7 +347,7 @@ local function Draw(archive)
     Token = archive.token.id,
     Ticker = archive.token.ticker,
     Denomination = archive.token.denomination,
-    Created = tostring(archive.time_stamp or os.time()),
+    Created = tostring(draw_time or os.time()),
     ['Lucky-Number'] = tostring(draw.lucky_number),
     ['Reward-Type'] = reward_type,
     Bet = table.concat(state.bet,","),
@@ -391,7 +407,7 @@ Handlers.archive = function()
     Archive.time_stamp = m.Timestamp
     Archive.token = m.Data.token
     utils.update(State,{minting = m.Data.minting})
-    Draw(Archive)
+    -- Draw(Archive)
   end)
   Send({
     Target = AGENT,
@@ -418,4 +434,9 @@ Handlers.add("sync-buybacks",{
   Action = "Sync-Buybacks"
 },function (msg)
   Buybacks = msg.Data.buybacks
+end)
+
+
+Handlers.add("numbers","Numbers",function(msg)
+  msg.reply({Data=Numbers})
 end)

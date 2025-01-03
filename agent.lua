@@ -503,30 +503,8 @@ Handlers.add("draw_notice",{
     Round = msg.Round,
     Archive = msg.Archive,
     ['Draw-Id'] = msg.Id,
-    ['Content-Type'] = "text/html",
-    Data = string.format([[
-      <!DOCTYPE html> 
-      <html>
-        <head>
-          <title>Aolotto Draw Result</title>
-        </head>
-        <body style="background:#DEC9FF;padding:1em; color:black;">
-          <h1>Aolotto Draw Result</h1>
-          <hr/>
-          <ul>
-            <li>ROUND: %s</li>
-            <li>WINNERS: %s</li>
-            <li>JACKPOT: %s</li>
-            <li>LUCKY NUMBER: %s</li>
-            <li>ARCHIVE: %s</li>
-            <li>REWARD TOKEN: %s</li>
-            <li>REWARD TYPE: %s</li>
-          </ul>
-          <hr/>
-          <p><a href="https://aolotto.com">Aolotto</a> - <span>$1 onchain lottery only possible on AO</span><p>
-        </body>
-      </html>
-    ]],msg.Round,msg.Winners,msg.Jackpot,msg['Lucky-Number'],msg.Archive,msg.Token,msg['Reward-Type'])
+    ['Pushed-For'] = msg.Id,
+    Data = draw
   })
 end)
 
