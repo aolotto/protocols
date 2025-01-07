@@ -38,6 +38,7 @@ TAXRATE = TAXRATE or 0.4
 WAGER_DIFFICULT = WAGER_DIFFICULT or 1.1
 DIVDIDEND_LIMIT = DIVDIDEND_LIMIT or 1000000000
 DRAW_DIFF_BLOCKHEIGHT = DRAW_DIFF_BLOCKHEIGHT or 5
+MINTING_PLUS_DUR = MINTING_PLUS_DUR or 600000
 
 
 
@@ -80,8 +81,8 @@ Handlers.add("save-ticket",{
   utils.update(State,{
     ts_latest_bet = tonumber(msg.Timestamp),
     minting = msg.Data.minting,
+    mint_speed = msg['Mint-Speed'] or State.mint_speed
   })
-
 
   -- update taxation, dividends, buyback
   utils.increase(Taxation,{tax,tax,0})
@@ -264,12 +265,19 @@ Handlers.add("Cron",function(msg)
   if Dividends[1] >= DIVDIDEND_LIMIT then
     Handlers.distribute() -- triger to distribute dividends
   end
+  -- triger to draw
   if Archive and Archive.id and Archive.archived_id and Archive.block_height then
     if msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT then
       Archive.drawing = true
       Archive.draw_time = msg.Timestamp
       Archive.draw_height = msg['Block-Height']
       Handlers.draw(Archive) -- triger to distribute dividends
+    end
+  end
+  if msg.Timestamp - State.ts_latest_bet >= MINTING_PLUS_DUR and State.ts_latest_bet > 0 and #Bets > 0 and State.ts_round_start>0 then
+    if msg.Timestamp - (State.latest_minting_plus or 0) >= MINTING_PLUS_DUR then
+      print("Minting plus triger ->"..msg.Timestamp.."-> diff:"..msg.Timestamp - (State.latest_minting_plus or 0))
+      Handlers.mintingPlus(msg.Timestamp)
     end
   end
 end)
@@ -391,7 +399,9 @@ Handlers.archive = function()
       jackpot = jackpot,
       wager_limit = wager_limit,
       ts_round_end = 0,
-      ts_latest_draw = 0
+      ts_latest_draw = 0,
+      latest_minting_plus = 0,
+      minting_plus = {0,0}
     })
     print("Round switch to "..State.round)
   end
@@ -440,3 +450,47 @@ end)
 Handlers.add("numbers","Numbers",function(msg)
   msg.reply({Data=Numbers})
 end)
+
+
+Handlers.mintingPlus = function (timestamp)
+  if(State.minting.quota[1] > 0) then
+    utils.update(State,{
+      latest_minting_plus = timestamp or os.time()
+    })
+
+    if not State.minting_plus then
+      State.minting_plus = {0,0}
+    end
+    
+    local lastest_bet = Bets[#Bets]
+    Send({
+      Target = AGENT,
+      Action = "Minting-Plus",
+      Player = lastest_bet.player,
+      ["Bet-Id"] = lastest_bet.id,
+      ["Bet-Index"] = tostring(#Bets),
+    }).onReply(function (msg)
+      local minted = msg.Data.minted
+      utils.update(State,{
+        minting = msg.Data.minting,
+      })
+      -- if not State.minting_plus_count then
+      --   State.minting_plus_count = 0
+      -- end
+      -- utils.increase(State,{minting_plus_count=1})
+      -- if not State.minting_plus_amount then
+      --   State.minting_plus_amount = 0
+      -- end
+      utils.increase(State.minting_plus,{minted.total,1})
+      
+      local index = tonumber(msg['Bet-Index']) or BetsIndexer[msg['Bet-Id']]
+      if minted then
+        if not Bets[index].mint.plus then
+          Bets[index].mint.plus = {0,0} -- {total, counts}
+        end
+        utils.increase(Bets[index].mint.plus,{minted.total,1})
+        print("Minting plus for bet "..msg['Bet-Id'].." : "..minted.total)
+      end
+    end)
+  end
+end

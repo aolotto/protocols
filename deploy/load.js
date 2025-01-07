@@ -69,7 +69,7 @@ inquirer
   .then(async(answers) => {
     const {env,processes} = answers
     const e = env=="pord"?env_prod:env_dev
-    console.log("loading ...")
+    console.log("⏳ loading ...")
     processes.forEach(async element => {
       const [key,pid] = element
       let data,fills
@@ -99,8 +99,17 @@ inquirer
 
       const { err,mid } = await ao.load({ data,fills, pid })
       if(err){throw(err)}
-      console.log("✓ loaded: " + mid + " > " + pid + " ("+key+")")
       
+
+      const result = await ao.result({ process:pid, message:mid })
+      if(result?.Error){throw(result?.Error)}
+      if(result?.Messages?.length>0){
+        console.log("❌ faild: "+ mid + " > " + pid + " ("+key+")")
+        console.log(result?.Messages?.[0])
+      }else{
+        console.log("✅ loaded: " + mid + " > " + pid + " ("+key+")")
+      }
+
     });
     
 

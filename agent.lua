@@ -45,6 +45,13 @@ MINT_TAX = MINT_TAX or "0.2"
 MAX_MINT = "210000000000000000000"
 BET2MINT_QUOTA_RATE = BET2MINT_QUOTA_RATE or "0.002"
 PER_MINT_BASE_RATE = PER_MINT_BASE_RATE or "0.001"
+MINT_TIER = MINT_TIER or {
+  ['100'] = 1,
+  ['50'] = 0.6,
+  ['10'] = 0.3,
+  ['1'] = 0.1
+}
+
 
 
 -- global tables
@@ -96,7 +103,23 @@ local function resetQuota()
   return Quota
 end
 
-local function Mint(count,uid)
+local function countMintQuantity(count,speed)
+  local _quota_balance =  Quota[1] or 0
+  if count >= 100 then
+    return _quota_balance * utils.toNumber(PER_MINT_BASE_RATE) * speed * count * MINT_TIER['100']
+  end
+  if count >= 50 then
+    return _quota_balance * utils.toNumber(PER_MINT_BASE_RATE) * speed * count * MINT_TIER['50']
+  end
+  if count >= 10 then
+    return _quota_balance * utils.toNumber(PER_MINT_BASE_RATE) * speed * count * MINT_TIER['10']
+  end
+  if count >= 1 then
+    return _quota_balance * utils.toNumber(PER_MINT_BASE_RATE) * speed * count * MINT_TIER['1']
+  end
+end
+
+local function Mint(count,uid,add_buff)
   assert(type(uid)=="string","Missed user id")
   assert(tonumber(count)>=1,"Missed count")
   if not Players[uid] then 
@@ -107,14 +130,16 @@ local function Mint(count,uid)
   local _speed = (utils.toNumber(MAX_MINT) - utils.toNumber(TotalSupply)) / utils.toNumber(MAX_MINT)
   local _player = Players[uid]
   
- 
   local _quota_balance =  Quota[1] or 0
   local _unit = math.max(_quota_balance * utils.toNumber(PER_MINT_BASE_RATE) * _speed,1)
   local _MINT_TAX = utils.toNumber(MINT_TAX) or 0.2
   
-  local _minted = math.min(_unit * _count,_quota_balance)
+  local _minted = math.min(countMintQuantity(_count,_speed),_quota_balance)
+  print("minted - "..string.format("%.0f",_minted))
+
   local _faucet_buff = 0
-  if _player.faucet[1]>0 then
+  if _player.faucet[1]>0 and add_buff == true then
+    print("faucet buff")
     _faucet_buff = math.min(_player.faucet[1] ,_minted)
     utils.decrease(Players[uid].faucet,{_faucet_buff,0})
   end
@@ -149,7 +174,6 @@ local function Mint(count,uid)
   -- return minted result
   return total_minted, user_minted, fundation_minted, tostring(_speed), tostring(_unit), tostring(_MINT_TAX), _faucet_buff>0 and tostring(_faucet_buff) or nil
 end
-
 
 
 Handlers.add("bet2mint",{
@@ -192,7 +216,7 @@ Handlers.add("bet2mint",{
   local mint = nil
   if Quota[1]>0 or Players[_minter].faucet[1]>0 then
    
-    local _minted, _user_minted, _fundation_minted, _speed, _unit, _mint_tax_rate, _mint_buff = Mint(_count, _minter)
+    local _minted, _user_minted, _fundation_minted, _speed, _unit, _mint_tax_rate, _mint_buff = Mint(_count, _minter,true)
     
     if utils.toNumber(_minted) > 0 and _player == _minter then
       mint = {
@@ -215,6 +239,7 @@ Handlers.add("bet2mint",{
     _message['Mint-Amount'] = _user_minted
     _message['Mint-Fundation'] = _fundation_minted
     _message['Mint-For'] = _minter
+    _message['Mint-Time'] = tostring(msg.Timestamp)
   end
   _message.Data = {
     token = {
@@ -232,7 +257,6 @@ Handlers.add("bet2mint",{
   }
   msg.forward(_pool_id,_message)
 end)
-
 
 
 -- facucet
@@ -280,6 +304,7 @@ end)
 Handlers.add("stats","Stats",function(msg)
   local stats = Stats
   stats.total_supply = TotalSupply
+  stats.mint_tier = MINT_TIER
   msg.reply({Data=stats})
 end)
 
@@ -575,3 +600,46 @@ Handlers.add("distribute-dividends",{
 end)
 
 
+Handlers.add("minting-plus",{
+  Action = "Minting-Plus",
+  From = function (_from) return _from == POOL_ID end,
+  Player = "_",
+  ['Bet-Id'] = "_",
+  ['Bet-Index'] = "%d+"
+},function (msg)
+  local _minted, _user_minted, _fundation_minted, _speed, _unit, _mint_tax_rate, _mint_buff = Mint(1, msg.Player)
+  local mint = {
+    total = _minted,
+    unit = _unit,
+    mint_tax_rate = _mint_tax_rate,
+    speed = _speed,
+    amount = _user_minted,
+    buff = _mint_buff,
+    ticker = Ticker,
+    token = ao.id,
+    denomination = Denomination
+  }
+  local _message = {
+    Action = "Minting-Plused",
+    ['Bet-Id'] = msg['Bet-Id'],
+    ['Bet-Index'] = msg['Bet-Index'],
+    ['Pushed-For'] = msg.Id,
+  }
+  _message.Mint = ao.id
+  _message['Mint-Total'] = _minted
+  _message['Mint-Buff'] = _mint_buff
+  _message['Mint-Speed'] = _speed
+  _message['Mint-Amount'] = _user_minted
+  _message['Mint-Fundation'] = _fundation_minted
+  _message['Mint-For'] = msg.Player
+  _message['Mint-Time'] = tostring(msg.Timestamp)
+  _message.Data = {
+    minted = mint,
+    minting = {
+      quota = Quota,
+      max_mint = MAX_MINT,
+      minted = TotalSupply
+    }
+  }
+  msg.reply(_message)
+end)
