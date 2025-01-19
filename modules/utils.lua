@@ -186,5 +186,10 @@ utils.updateRanking = function(tbl, k, v, len)
 end
 
 
+utils.utf8len = function(input)
+  local _, count = input:gsub("[^\128-\191]", "")
+  return count
+end
+
 
 return utils

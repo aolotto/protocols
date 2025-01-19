@@ -39,6 +39,7 @@ WAGER_DIFFICULT = WAGER_DIFFICULT or 1.1
 DIVDIDEND_LIMIT = DIVDIDEND_LIMIT or 1000000000
 DRAW_DIFF_BLOCKHEIGHT = DRAW_DIFF_BLOCKHEIGHT or 5
 MINTING_PLUS_DUR = MINTING_PLUS_DUR or 600000
+MINTING_PLUS_LOCKER = MINTING_PLUS_LOCKER or false
 
 
 
@@ -50,6 +51,7 @@ Taxation = Taxation or {0,0,0}
 Dividends = Dividends or {0,0,0}
 Buybacks = Buybacks or {0,0,0}
 Participants = Participants or {}
+GapRewards = GapRewards or {}
 
 
 
@@ -101,7 +103,8 @@ Handlers.add("save-ticket",{
     price = msg.Price,
     token = msg.Data.token,
     mint = msg.Data.minted,
-    sponsor = msg.Data.sponsor
+    sponsor = msg.Data.sponsor,
+    note = msg.Note or nil
   }
   table.insert(Bets,bet)
   BetsIndexer = BetsIndexer or {}
@@ -132,6 +135,7 @@ Handlers.add("save-ticket",{
     Ticker = bet.token.ticker,
     Denomination = bet.token.denomination,
     Title = "Aolotto Ticket",
+    Note = msg.Note,
     ['Content-Type'] = "text/html",
     ['X-Numbers'] = x_numbers,
     ['Pushed-For'] = bet.id,
@@ -161,11 +165,12 @@ Handlers.add("save-ticket",{
             <li>OWNER: %s</li>
             <li>PAY TOKEN: %s</li>
           </ul>
+          <div>%s</div>
           <hr/>
           <p><a href="https://aolotto.com">Aolotto</a> - <span>$1 onchain lottery only possible on AO</span><p>
         </body>
       </html>
-    ]],bet.id,tostring(bet.round),x_numbers,msg.Count,bet.player,bet.token.id or "-")
+    ]],bet.id,tostring(bet.round),x_numbers,msg.Count,bet.player,bet.token.id or "-", bet.note or "")
   }
   Send(lotto_notice)
 
@@ -240,6 +245,10 @@ Handlers.add("state","State",function(msg)
 end)
 
 
+Handlers.add("gap_rewards","Gap-Rewards",function(msg)
+  msg.reply({ Data=GapRewards})
+end)
+
 
 Handlers.add("get",{Action = "Get"},{
   [{Table = "Bets"}] = function(msg)
@@ -252,13 +261,14 @@ Handlers.add("get",{Action = "Get"},{
     msg.reply({
       Total= tostring(#Draws),
       Data= utils.query(Draws,tonumber(msg.Limit) or 100,tonumber(msg.Offset) or 1,{"ts_draw","desc"})
-    }) 
+    })
   end
 })
 
 
 
 Handlers.add("Cron",function(msg)
+  print("cron")
   if msg.Timestamp >= State.ts_latest_draw and State.ts_latest_draw > 0 and #Bets > 0 then
     Handlers.archive() -- triger to switch round
   end
@@ -274,11 +284,10 @@ Handlers.add("Cron",function(msg)
       Handlers.draw(Archive) -- triger to distribute dividends
     end
   end
-  if msg.Timestamp - State.ts_latest_bet >= MINTING_PLUS_DUR and State.ts_latest_bet > 0 and #Bets > 0 and State.ts_round_start>0 then
-    if msg.Timestamp - (State.latest_minting_plus or 0) >= MINTING_PLUS_DUR then
-      print("Minting plus triger ->"..msg.Timestamp.."-> diff:"..msg.Timestamp - (State.latest_minting_plus or 0))
-      Handlers.mintingPlus(msg.Timestamp)
-    end
+  if msg.Timestamp - math.max(State.ts_latest_bet,State.latest_minting_plus) >= MINTING_PLUS_DUR and #Bets > 0 and State.ts_round_start>0 and MINTING_PLUS_LOCKER==false then
+    local mint_time = math.max(State.ts_latest_bet,State.latest_minting_plus)+MINTING_PLUS_DUR
+    print("Minting plus triger ->"..msg.Timestamp.."/"..mint_time.."-> diff:".. msg.Timestamp - mint_time)
+    Handlers.mintingPlus(mint_time)
   end
 end)
 
@@ -384,6 +393,7 @@ Handlers.archive = function()
     Numbers = {}
     Participants = {}
     BetsIndexer = {}
+    GapRewards = {}
     local balance = State.balance - State.jackpot
     local jackpot = balance * JACKPOT_SCALE
     local wager_limit = math.max(State.wager_limit, PRICE * 1000 + jackpot )
@@ -453,43 +463,47 @@ end)
 
 
 Handlers.mintingPlus = function (timestamp)
-  if(State.minting.quota[1] > 0) then
-    utils.update(State,{
-      latest_minting_plus = timestamp or os.time()
-    })
+  if State.minting.quota[1] > 0 then
+    MINTING_PLUS_LOCKER = true
+    State.latest_minting_plus = timestamp
 
     if not State.minting_plus then
       State.minting_plus = {0,0}
     end
     
     local lastest_bet = Bets[#Bets]
-    Send({
+
+    local message = {
       Target = AGENT,
       Action = "Minting-Plus",
       Player = lastest_bet.player,
       ["Bet-Id"] = lastest_bet.id,
       ["Bet-Index"] = tostring(#Bets),
-    }).onReply(function (msg)
+      ["Mint-Time"] = tostring(timestamp)
+    }
+    print("distribute gap-reward")
+    Send(message).onReply(function (msg)
+      MINTING_PLUS_LOCKER = false
       local minted = msg.Data.minted
+      -- log gap-rewards
+      if not GapRewards then GapRewards = {} end
+      if not GapRewards[msg['Bet-Id']] then GapRewards[msg['Bet-Id']] = {} end
+      table.insert(GapRewards[msg['Bet-Id']],{msg["Mint-Time"],minted.total,msg.Id})
+
+      -- update state
       utils.update(State,{
-        minting = msg.Data.minting,
+        minting = msg.Data.minting
       })
-      -- if not State.minting_plus_count then
-      --   State.minting_plus_count = 0
-      -- end
-      -- utils.increase(State,{minting_plus_count=1})
-      -- if not State.minting_plus_amount then
-      --   State.minting_plus_amount = 0
-      -- end
       utils.increase(State.minting_plus,{minted.total,1})
       
+      -- update the bet
       local index = tonumber(msg['Bet-Index']) or BetsIndexer[msg['Bet-Id']]
       if minted then
         if not Bets[index].mint.plus then
           Bets[index].mint.plus = {0,0} -- {total, counts}
         end
         utils.increase(Bets[index].mint.plus,{minted.total,1})
-        print("Minting plus for bet "..msg['Bet-Id'].." : "..minted.total)
+        -- print("Minting plus for bet "..msg['Bet-Id'].." - at "..msg.Timestamp)
       end
     end)
   end

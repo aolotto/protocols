@@ -51,7 +51,8 @@ MINT_TIER = MINT_TIER or {
   ['10'] = 0.3,
   ['1'] = 0.1
 }
-
+LP_ID = LP_ID or "2sWVPeUTYuB0VMrkgC9m_0MwljaZqEJdAfgJXNZgEIw"
+LP_HOLDER = LP_HOLDER or "pEPZTnyiF-IDL1NLXPEy_hTy0QjiRNPtQ7SmpnBCA-0"
 
 
 -- global tables
@@ -135,7 +136,7 @@ local function Mint(count,uid,add_buff)
   local _MINT_TAX = utils.toNumber(MINT_TAX) or 0.2
   
   local _minted = math.min(countMintQuantity(_count,_speed),_quota_balance)
-  print("minted - "..string.format("%.0f",_minted))
+  -- print("minted - "..string.format("%.0f",_minted))
 
   local _faucet_buff = 0
   if _player.faucet[1]>0 and add_buff == true then
@@ -205,8 +206,14 @@ Handlers.add("bet2mint",{
     Amount = tostring(_amount),
     Tax = tostring(_tax),
     Price = _pool.Price,
-    Player = _player
+    Player = _player,
   }
+  -- custom note
+  if tonumber(msg.Quantity) - _amount >= 100000 and msg['X-Note'] then
+    if utils.utf8len(msg['X-Note']) <= 64 then
+      _message.Note = msg['X-Note']
+    end
+  end
 
   if Quota[2]==0 and utils.toNumber(TotalSupply)==0 then 
     resetQuota() 
@@ -549,6 +556,9 @@ Handlers.add("distribute-dividends",{
   local _addresses = 0
   for uid, value in pairs(Balances) do
     if utils.toNumber(value) > 0 and uid ~= Owner then
+      if uid == LP_ID then 
+        uid = LP_HOLDER 
+      end -- replace LP_ID to LP_HOLDER
       if not Players[uid] then Players[uid] = utils.deepCopy(initial_user) end
       _addresses = _addresses + 1
       local _amount = _unit * utils.toNumber(value)
@@ -623,6 +633,7 @@ Handlers.add("minting-plus",{
     Action = "Minting-Plused",
     ['Bet-Id'] = msg['Bet-Id'],
     ['Bet-Index'] = msg['Bet-Index'],
+    ["Triger-Time"] = msg["Triger-Time"],
     ['Pushed-For'] = msg.Id,
   }
   _message.Mint = ao.id
@@ -632,7 +643,7 @@ Handlers.add("minting-plus",{
   _message['Mint-Amount'] = _user_minted
   _message['Mint-Fundation'] = _fundation_minted
   _message['Mint-For'] = msg.Player
-  _message['Mint-Time'] = tostring(msg.Timestamp)
+  _message['Mint-Time'] =msg['Mint-Time'] or tostring(msg.Timestamp)
   _message.Data = {
     minted = mint,
     minting = {
