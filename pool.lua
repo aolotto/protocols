@@ -268,7 +268,8 @@ Handlers.add("get",{Action = "Get"},{
 
 
 Handlers.add("Cron",function(msg)
-  print("cron")
+  assert(State.run == 1,"the pool is paused")
+  print("cron "..msg.Timestamp)
   if msg.Timestamp >= State.ts_latest_draw and State.ts_latest_draw > 0 and #Bets > 0 then
     Handlers.archive() -- triger to switch round
   end
@@ -508,3 +509,29 @@ Handlers.mintingPlus = function (timestamp)
     end)
   end
 end
+
+Handlers.add("pause",{
+  From = AGENT,
+  Action = "Pause"
+},function(msg)
+  assert(State.run == 1,"the pool is already paused")
+  State.run = 0
+  MINTING_PLUS_LOCKER = true
+  State.latest_pause = msg.Timestamp or os.time()
+  State.total_pause = (State.total_pause or 0) + 1
+  print("The pool has been paused")
+end)
+
+Handlers.add("resume",{
+  From = AGENT,
+  Action = "Resume"
+},function(msg)
+  assert(State.run == 0,"the pool is already running")
+  local diff = msg.Timestamp - (State.latest_pause or msg.Timestamp)
+  State.ts_latest_draw = State.ts_latest_draw + diff
+  State.latest_minting_plus = State.latest_minting_plus + diff
+  State.run = 1
+  MINTING_PLUS_LOCKER = false
+  State.latest_pause = nil
+  print("The pool has been resumed")
+end)
