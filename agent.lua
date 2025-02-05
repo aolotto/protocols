@@ -413,7 +413,7 @@ end
 
 
 -- claim
-local function doClaim(claim)
+Handlers.appoveClaim = function(claim)
   Handlers.once('once_claimed_'..claim.id,{
     Action = "Debit-Notice",
     From = DEFAULT_PAY_TOKEN_ID,
@@ -436,6 +436,7 @@ local function doClaim(claim)
       total_claimed_amount = tonumber(m['X-Amount']),
       total_taxation = _tax
     })
+    print("Appoved the Claim: "..claim.id)
   end)
   Send({
     Target = DEFAULT_PAY_TOKEN_ID,
@@ -483,7 +484,12 @@ Handlers.add("claim",{
     Claims[msg.Id] = claim
     utils.decrease(Players[msg.From].win,{claim.amount,0,-claim.amount})
     utils.decrease(Players[msg.From].tax,{claim.tax,0,-claim.tax})
-    doClaim(claim)
+    -- doClaim(claim)
+    Send({
+      Target = msg.From,
+      Action = "Claim-Applied",
+      Data = claim
+    })
   end
 end)
 
