@@ -284,15 +284,7 @@ Handlers.add("Cron",function(msg)
   if Dividends[1] >= DIVDIDEND_LIMIT and DIVIDEND_LOCKER == false then
     Handlers.distribute() -- triger to distribute dividends
   end
-  -- triger to draw
-  -- if Archive and Archive.id and Archive.archived_id and Archive.block_height and DRAW_LOCKER == false then
-  --   if msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT then
-  --     Archive.drawing = true
-  --     Archive.draw_time = msg.Timestamp
-  --     Archive.draw_height = msg['Block-Height']
-  --     -- Handlers.draw(Archive) -- triger to distribute dividends
-  --   end
-  -- end
+
   if msg.Timestamp - math.max(State.ts_latest_bet,State.latest_minting_plus) >= MINTING_PLUS_DUR and #Bets > 0 and State.ts_round_start>0 and MINTING_PLUS_LOCKER==false then
     local mint_time = math.max(State.ts_latest_bet,State.latest_minting_plus) + MINTING_PLUS_DUR
     print("Minting plus triger ->"..msg.Timestamp.."/"..mint_time.."-> diff:".. msg.Timestamp - mint_time)
