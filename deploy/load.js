@@ -81,7 +81,7 @@ inquirer
         break;
         case "POOL":
           data = src_pool[0]
-          fills = {AGENT:e.AGENT_ID}
+          fills = {AGENT:e.AGENT_ID,OPREATOR:"j0Lrrv1ltimsYnD_5f-8Fp3QKcAbUjckn7kjCZCfvhk"}
         break;
         case "FAUCET":
           data = src_faucet[0]

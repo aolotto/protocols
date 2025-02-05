@@ -26,6 +26,7 @@ local initial_state = {
 
 
 AGENT = AGENT or ao.env.Process.Tags['Agent'] or "<AGENT>"
+OPREATOR = OPREATOR or "<OPREATOR>"
 -- TOKEN = TOKEN or ao.env.Process.Tags['Token'] or "KCAqEdXfGoWZNhtgPRIL0yGgWlCDUl0gvHu8dnE5EJs"
 PRICE = PRICE or 1000000
 DIGITS = DIGITS or 3
@@ -40,6 +41,9 @@ DIVDIDEND_LIMIT = DIVDIDEND_LIMIT or 1000000000
 DRAW_DIFF_BLOCKHEIGHT = DRAW_DIFF_BLOCKHEIGHT or 5
 MINTING_PLUS_DUR = MINTING_PLUS_DUR or 600000
 MINTING_PLUS_LOCKER = MINTING_PLUS_LOCKER or false
+DRAW_LOCKER = DRAW_LOCKER or false
+DIVIDEND_LOCKER = DIVIDEND_LOCKER or false
+ARCHIVE_LOCKER = ARCHIVE_LOCKER or false
 
 
 
@@ -241,6 +245,7 @@ end)
 Handlers.add("state","State",function(msg)
   local _state = utils.deepCopy(State)
   _state.picks = Numbers
+  _state.draw_delay = DRAW_DELAY
   msg.reply({ Data=_state})
 end)
 
@@ -269,24 +274,27 @@ Handlers.add("get",{Action = "Get"},{
 
 Handlers.add("Cron",function(msg)
   assert(State.run == 1,"the pool is paused")
-  print("cron "..msg.Timestamp)
+  -- print("cron "..msg.Timestamp)
   if msg.Timestamp >= State.ts_latest_draw and State.ts_latest_draw > 0 and #Bets > 0 then
-    Handlers.archive() -- triger to switch round
+    if not Archive and ARCHIVE_LOCKER == false then
+      Handlers.archive() -- triger to switch round
+    end
+     
   end
-  if Dividends[1] >= DIVDIDEND_LIMIT then
+  if Dividends[1] >= DIVDIDEND_LIMIT and DIVIDEND_LOCKER == false then
     Handlers.distribute() -- triger to distribute dividends
   end
   -- triger to draw
-  if Archive and Archive.id and Archive.archived_id and Archive.block_height then
-    if msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT then
-      Archive.drawing = true
-      Archive.draw_time = msg.Timestamp
-      Archive.draw_height = msg['Block-Height']
-      Handlers.draw(Archive) -- triger to distribute dividends
-    end
-  end
+  -- if Archive and Archive.id and Archive.archived_id and Archive.block_height and DRAW_LOCKER == false then
+  --   if msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT then
+  --     Archive.drawing = true
+  --     Archive.draw_time = msg.Timestamp
+  --     Archive.draw_height = msg['Block-Height']
+  --     -- Handlers.draw(Archive) -- triger to distribute dividends
+  --   end
+  -- end
   if msg.Timestamp - math.max(State.ts_latest_bet,State.latest_minting_plus) >= MINTING_PLUS_DUR and #Bets > 0 and State.ts_round_start>0 and MINTING_PLUS_LOCKER==false then
-    local mint_time = math.max(State.ts_latest_bet,State.latest_minting_plus)+MINTING_PLUS_DUR
+    local mint_time = math.max(State.ts_latest_bet,State.latest_minting_plus) + MINTING_PLUS_DUR
     print("Minting plus triger ->"..msg.Timestamp.."/"..mint_time.."-> diff:".. msg.Timestamp - mint_time)
     Handlers.mintingPlus(mint_time)
   end
@@ -294,6 +302,8 @@ end)
 
 
 Handlers.draw = function(archive)
+  assert(archive~=nil,"no archived round to draw")
+  DRAW_LOCKER = true
   local draw_time = archive.draw_time or os.time()
   local archive_id = archive.id
   local archived_id = archive.archived_id or ao.id
@@ -374,9 +384,28 @@ Handlers.draw = function(archive)
   Send(draw_notice).onReply(function (msg)
     table.insert(Draws,{round=msg.Round,id=msg['Draw-Id'],archive=msg.Archive, draw_result=msg.Id})
     Archive = nil
+    DRAW_LOCKER = false
     print("Finish drawing for round " .. msg.Round .. " : "..msg.Id)
   end)
 end
+
+Handlers.add("draw",{
+  Action = "Draw",
+  From = function (_from)
+    return _from == ao.id or _from == Owner  or _from == OPREATOR
+  end
+},function (msg)
+  print(msg['Block-Height'])
+  assert(Archive ~= nil,"no archive to draw")
+  assert(Archive.id ~= nil,"no archive id")
+  assert(Archive.archived_id ~= nil, "not archived")
+  assert(Archive.block_height ~= nil and msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT , "not reach the draw_block")
+  if msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT and DRAW_LOCKER == false then
+    Archive.draw_time = msg.Timestamp
+    Archive.draw_height = Archive.block_height + DRAW_DIFF_BLOCKHEIGHT
+    Handlers.draw(Archive)
+  end
+end)
 
 Handlers.archive = function()
   if not Archive then
@@ -428,8 +457,9 @@ Handlers.archive = function()
     Archive.time_stamp = m.Timestamp
     Archive.token = m.Data.token
     utils.update(State,{minting = m.Data.minting})
-    -- Draw(Archive)
+    ARCHIVE_LOCKER = false
   end)
+  ARCHIVE_LOCKER = true
   Send({
     Target = AGENT,
     Action = "Archive",
@@ -439,6 +469,7 @@ Handlers.archive = function()
 end
 
 Handlers.distribute = function()
+  DIVIDEND_LOCKER = true
   local dividends_bal = Dividends[1]
   assert(dividends_bal>=1,"no dividends to distribute")
   Send({
@@ -447,6 +478,7 @@ Handlers.distribute = function()
   }).onReply(function (m)
     print("distributed:"..m.Amount.."-"..m.Id)
     Dividends = m.Data
+    DIVIDEND_LOCKER = false
   end)
 end
 
@@ -483,6 +515,7 @@ Handlers.mintingPlus = function (timestamp)
       ["Mint-Time"] = tostring(timestamp)
     }
     print("distribute gap-reward")
+    -- print(message)
     Send(message).onReply(function (msg)
       MINTING_PLUS_LOCKER = false
       local minted = msg.Data.minted
@@ -504,7 +537,7 @@ Handlers.mintingPlus = function (timestamp)
           Bets[index].mint.plus = {0,0} -- {total, counts}
         end
         utils.increase(Bets[index].mint.plus,{minted.total,1})
-        -- print("Minting plus for bet "..msg['Bet-Id'].." - at "..msg.Timestamp)
+        print("Minting plus for bet "..msg['Bet-Id'].." - at "..msg.Timestamp)
       end
     end)
   end

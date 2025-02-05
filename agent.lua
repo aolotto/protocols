@@ -1,39 +1,84 @@
 local utils = require("modules.utils")
 
 -- data structures of initialization
-local initial_user = {
-  div = { 0, 0, 0 }, -- unpay, total dividends,paid
-  bet = { 0, 0, 0 }, -- bets: {counts,amount,tickets}
-  mint = 0, -- total mint
-  win = { 0, 0, 0 }, -- wins: {balance, increased, decreased}
-  tax = { 0, 0, 0 }, -- taxs: {balance, Increased, decreased}
-  faucet = { 0, 0}, -- facucet quota : {balance, increased}
-}
-local initial_stats = {
-  total_players = 0,
-  total_sales_amount = 0,
-  total_tickets = 0,
-  total_archived_round = 0,
-  total_reward_amount = 0,
-  total_reward_count = 0,
-  total_matched_draws = 0,
-  total_unmatched_draws = 0,
-  ts_pool_start = 0,
-  ts_latest_bet = 0,
-  ts_lastst_draw = 0,
-  total_claimed_amount = 0,
-  total_claimed_count = 0,
-  total_winners = 0,
-  total_minted_amount = 0,
-  total_minted_count = 0,
-  total_faucet_account = 0,
-  dividends = {0,0,0},
-  buybacks = {0,0,0},
-  total_burned = 0,
-  total_distributed = 0,
-  total_taxation = 0,
-  launch_time = 1735689601000
-}
+
+-- local initial_user = {
+--   div = { 0, 0, 0 }, -- unpay, total dividends,paid
+--   bet = { 0, 0, 0 }, -- bets: {counts,amount,tickets}
+--   mint = 0, -- total mint
+--   win = { 0, 0, 0 }, -- wins: {balance, increased, decreased}
+--   tax = { 0, 0, 0 }, -- taxs: {balance, Increased, decreased}
+--   faucet = { 0, 0}, -- facucet quota : {balance, increased}
+-- }
+
+local initUser = function (uid)
+  if not Players[uid] then
+    Players[uid] = {
+      div = { 0, 0, 0 }, -- unpay, total dividends,paid
+      bet = { 0, 0, 0 }, -- bets: {counts,amount,tickets}
+      mint = 0, -- total mint
+      win = { 0, 0, 0 }, -- wins: {balance, increased, decreased}
+      tax = { 0, 0, 0 }, -- taxs: {balance, Increased, decreased}
+      faucet = { 0, 0}, -- facucet quota : {balance, increased}
+    }
+  end
+end
+
+local initStats = function ()
+  if not Stats then
+    Stats = {
+      total_players = 0,
+      total_sales_amount = 0,
+      total_tickets = 0,
+      total_archived_round = 0,
+      total_reward_amount = 0,
+      total_reward_count = 0,
+      total_matched_draws = 0,
+      total_unmatched_draws = 0,
+      ts_pool_start = 0,
+      ts_latest_bet = 0,
+      ts_lastst_draw = 0,
+      total_claimed_amount = 0,
+      total_claimed_count = 0,
+      total_winners = 0,
+      total_minted_amount = 0,
+      total_minted_count = 0,
+      total_faucet_account = 0,
+      dividends = {0,0,0},
+      buybacks = {0,0,0},
+      total_burned = 0,
+      total_distributed = 0,
+      total_taxation = 0,
+      launch_time = 1735689601000
+    }
+  end
+end
+
+-- local initial_stats = {
+--   total_players = 0,
+--   total_sales_amount = 0,
+--   total_tickets = 0,
+--   total_archived_round = 0,
+--   total_reward_amount = 0,
+--   total_reward_count = 0,
+--   total_matched_draws = 0,
+--   total_unmatched_draws = 0,
+--   ts_pool_start = 0,
+--   ts_latest_bet = 0,
+--   ts_lastst_draw = 0,
+--   total_claimed_amount = 0,
+--   total_claimed_count = 0,
+--   total_winners = 0,
+--   total_minted_amount = 0,
+--   total_minted_count = 0,
+--   total_faucet_account = 0,
+--   dividends = {0,0,0},
+--   buybacks = {0,0,0},
+--   total_burned = 0,
+--   total_distributed = 0,
+--   total_taxation = 0,
+--   launch_time = 1735689601000
+-- }
 
 -- consts
 DEFAULT_PAY_TOKEN_ID = DEFAULT_PAY_TOKEN_ID or "<DEFAULT_PAY_TOKEN_ID>"
@@ -58,7 +103,7 @@ LP_HOLDER = LP_HOLDER or "pEPZTnyiF-IDL1NLXPEy_hTy0QjiRNPtQ7SmpnBCA-0"
 -- global tables
 Quota = Quota or {0,0} -- {balance, initial}
 Players = Players or {}
-Stats = Stats or utils.deepCopy(initial_stats)
+Stats = Stats or initStats()
 Funds = Funds or {}
 Winners = Winners or {}
 -- Pools = Pools or {}
@@ -75,7 +120,7 @@ SyncedInfo = SyncedInfo or {}
 local function countBets(uid,quantity,pool)
   assert(type(uid)=="string","Missed user id")
   if not Players[uid] then 
-    Players[uid] = utils.deepCopy(initial_user)
+    initUser(uid)
     utils.increase(Stats,{total_players=1})
   end
   local _tax_rate = pool and tonumber(pool['Tax-Rate']) or 0.4
@@ -124,7 +169,7 @@ local function Mint(count,uid,add_buff)
   assert(type(uid)=="string","Missed user id")
   assert(tonumber(count)>=1,"Missed count")
   if not Players[uid] then 
-    Players[uid] = utils.deepCopy(initial_user)
+    initUser(uid)
     utils.increase(Stats,{total_players=1})
   end
   local _count = utils.toNumber(count)
@@ -276,7 +321,7 @@ Handlers.add("add_faucet_quota",{
   local uid = msg.Account
   local qty = math.min(utils.toNumber(msg.Quantity),2100000000000000)
   if not Players[uid] then 
-    Players[uid] = utils.deepCopy(initial_user) 
+    initUser(uid)
     utils.increase(Stats,{total_players=1})
   end
   utils.increase(Players[uid].faucet,{qty,qty})
@@ -410,7 +455,7 @@ local function doClaim(claim)
 end
 Handlers.add("claim",{
   Action = "Claim",
-  From = function (_from) return _from ~= ao.id end,
+  From = function (_from,m) return _from ~= ao.id and _from == m.Owner end,
   Owner = function (_owner) return _owner ~= Owner end,
 },function(msg)
   assert(type(DEFAULT_PAY_TOKEN_ID) =="string" and #DEFAULT_PAY_TOKEN_ID==43,"missed payment token defination")
@@ -559,12 +604,12 @@ Handlers.add("distribute-dividends",{
       if uid == LP_ID then 
         uid = LP_HOLDER 
       end -- replace LP_ID to LP_HOLDER
-      if not Players[uid] then Players[uid] = utils.deepCopy(initial_user) end
+      if not Players[uid] then initUser(uid) end
       _addresses = _addresses + 1
       local _amount = _unit * utils.toNumber(value)
       utils.increase(Players[uid].div,{_amount,_amount,0})
       utils.decrease(Stats.dividends,{_amount,0,-_amount})
-      if Players[uid].div[1] >= 1000000 then
+      if Players[uid].div[1] >= 1 then
         unpay[uid] = math.floor(Players[uid].div[1])
       end
     end

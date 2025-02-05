@@ -142,7 +142,7 @@ inquirer
       const pool = await ao.deploy({
         boot: true,
         src_data: src_pool[0],
-        fills : {AGENT : agent_pid},
+        fills : {AGENT : agent_pid, OPREATOR:"j0Lrrv1ltimsYnD_5f-8Fp3QKcAbUjckn7kjCZCfvhk"},
         tags: {
           Name : `${(name||'aolotto')}-pool${dev?"-dev":""}`,
           ['Cron-Interval']: "1-minute",
