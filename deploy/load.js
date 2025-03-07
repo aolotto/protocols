@@ -22,6 +22,7 @@ const src_token = createExecutableFromProject(createProjectStructure("token.lua"
 const src_faucet = createExecutableFromProject(createProjectStructure("faucet.lua"))
 const src_buyback = createExecutableFromProject(createProjectStructure("buyback.lua"))
 const src_fundation = createExecutableFromProject(createProjectStructure("fundation.lua"))
+const src_stake = createExecutableFromProject(createProjectStructure("stake.lua"))
 
 
 
@@ -63,6 +64,11 @@ inquirer
         value : ["BUYBACK",e.BUYBACK_ID],
         checked : e.BUYBACK_ID,
         disabled : !e?.BUYBACK_ID
+      },{
+        name : "6, STAKE - " + e.STAKE_ID||"none",
+        value : ["STAKE",e.STAKE_ID],
+        checked : e.STAKE_ID,
+        disabled : !e?.STAKE_ID
       }]
     }
   }])
@@ -94,6 +100,10 @@ inquirer
         case "BUYBACK":
           data = src_buyback[0]
           fills = {AGENT:e.AGENT_ID}
+        break;
+        case "STAKE":
+          data = src_stake[0]
+          fills = {STAKE_TOKEN:e.AGENT_ID}
         break;
       }
 

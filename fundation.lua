@@ -1,5 +1,6 @@
 local utils = require("modules.utils")
 AGENT = AGENT or ao.env.Process.Tags['Agent'] or "<AGENT>"
+OPREATOR = OPREATOR or "j0Lrrv1ltimsYnD_5f-8Fp3QKcAbUjckn7kjCZCfvhk"
 
 
 Funds = Funds or {}
@@ -49,3 +50,21 @@ end}, function (msg)
   print(bill)
 end)
 
+Handlers.transferToOP = function (token,amount)
+  assert(Funds[token]~=nil,"missed the token funds")
+  local _bal = Funds[token].bal
+  local _amount = 0
+  if amount and type(amount) == "number" then
+    _amount = math.min(amount,_bal)
+  else
+    _amount = _bal
+  end
+  local recipient = OPREATOR or "j0Lrrv1ltimsYnD_5f-8Fp3QKcAbUjckn7kjCZCfvhk"
+  Send({
+    Target = token,
+    Action = "Transfer",
+    Recipient = recipient,
+    Quantity = string.format("%0.f",_amount),
+    ['X-Transfer-Type'] = "transferToOP"
+  })
+end

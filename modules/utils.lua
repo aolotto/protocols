@@ -191,5 +191,19 @@ utils.utf8len = function(input)
   return count
 end
 
+utils.initUser = function (uid)
+  if not Players[uid] then
+    Players[uid] = {
+      div = { 0, 0, 0 }, -- unpay, total dividends,paid
+      bet = { 0, 0, 0 }, -- bets: {counts,amount,tickets}
+      mint = 0, -- total mint
+      win = { 0, 0, 0 }, -- wins: {balance, increased, decreased}
+      tax = { 0, 0, 0 }, -- taxs: {balance, Increased, decreased}
+      faucet = { 0, 0}, -- facucet quota : {balance, increased}
+      stake = {0,0,0}, -- stake: { balance, total, count}
+    }
+  end
+end
+
 
 return utils

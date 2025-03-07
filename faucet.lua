@@ -81,3 +81,18 @@ Handlers.add("info","Info",function(msg)
     }
   })
 end)
+
+
+-- Handlers.manualShare = function (account,amount)
+--   Send({
+--     Target = AGENT,
+--     Action = "Add-Faucet-Quota",
+--     Quantity = amount,
+--     Account = account
+--   }).onReply(function(m)
+--     Supplied = Supplied +tonumber(m.Quantity)
+
+--   end)
+
+-- end
+

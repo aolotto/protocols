@@ -2,83 +2,35 @@ local utils = require("modules.utils")
 
 -- data structures of initialization
 
--- local initial_user = {
---   div = { 0, 0, 0 }, -- unpay, total dividends,paid
---   bet = { 0, 0, 0 }, -- bets: {counts,amount,tickets}
---   mint = 0, -- total mint
---   win = { 0, 0, 0 }, -- wins: {balance, increased, decreased}
---   tax = { 0, 0, 0 }, -- taxs: {balance, Increased, decreased}
---   faucet = { 0, 0}, -- facucet quota : {balance, increased}
--- }
-
-local initUser = function (uid)
-  if not Players[uid] then
-    Players[uid] = {
-      div = { 0, 0, 0 }, -- unpay, total dividends,paid
-      bet = { 0, 0, 0 }, -- bets: {counts,amount,tickets}
-      mint = 0, -- total mint
-      win = { 0, 0, 0 }, -- wins: {balance, increased, decreased}
-      tax = { 0, 0, 0 }, -- taxs: {balance, Increased, decreased}
-      faucet = { 0, 0}, -- facucet quota : {balance, increased}
-    }
-  end
-end
-
 local initStats = function ()
-  if not Stats then
-    Stats = {
-      total_players = 0,
-      total_sales_amount = 0,
-      total_tickets = 0,
-      total_archived_round = 0,
-      total_reward_amount = 0,
-      total_reward_count = 0,
-      total_matched_draws = 0,
-      total_unmatched_draws = 0,
-      ts_pool_start = 0,
-      ts_latest_bet = 0,
-      ts_lastst_draw = 0,
-      total_claimed_amount = 0,
-      total_claimed_count = 0,
-      total_winners = 0,
-      total_minted_amount = 0,
-      total_minted_count = 0,
-      total_faucet_account = 0,
-      dividends = {0,0,0},
-      buybacks = {0,0,0},
-      total_burned = 0,
-      total_distributed = 0,
-      total_taxation = 0,
-      launch_time = 1735689601000
-    }
-  end
+  Stats = {
+    total_players = 0,
+    total_sales_amount = 0,
+    total_tickets = 0,
+    total_archived_round = 0,
+    total_reward_amount = 0,
+    total_reward_count = 0,
+    total_matched_draws = 0,
+    total_unmatched_draws = 0,
+    ts_pool_start = 0,
+    ts_latest_bet = 0,
+    ts_lastst_draw = 0,
+    total_claimed_amount = 0,
+    total_claimed_count = 0,
+    total_winners = 0,
+    total_minted_amount = 0,
+    total_minted_count = 0,
+    total_faucet_account = 0,
+    dividends = {0,0,0},
+    buybacks = {0,0,0},
+    total_burned = 0,
+    total_distributed = 0,
+    total_taxation = 0,
+    launch_time = 1735689601000
+  }
 end
+if not Stats then initStats() end
 
--- local initial_stats = {
---   total_players = 0,
---   total_sales_amount = 0,
---   total_tickets = 0,
---   total_archived_round = 0,
---   total_reward_amount = 0,
---   total_reward_count = 0,
---   total_matched_draws = 0,
---   total_unmatched_draws = 0,
---   ts_pool_start = 0,
---   ts_latest_bet = 0,
---   ts_lastst_draw = 0,
---   total_claimed_amount = 0,
---   total_claimed_count = 0,
---   total_winners = 0,
---   total_minted_amount = 0,
---   total_minted_count = 0,
---   total_faucet_account = 0,
---   dividends = {0,0,0},
---   buybacks = {0,0,0},
---   total_burned = 0,
---   total_distributed = 0,
---   total_taxation = 0,
---   launch_time = 1735689601000
--- }
 
 -- consts
 DEFAULT_PAY_TOKEN_ID = DEFAULT_PAY_TOKEN_ID or "<DEFAULT_PAY_TOKEN_ID>"
@@ -86,6 +38,7 @@ FUNDATION_ID = FUNDATION_ID or "<FUNDATION_ID>"
 FAUCET_ID = FAUCET_ID or "<FAUCET_ID>"
 BUYBACK_ID = BUYBACK_ID or "<BUYBACK_ID>"
 POOL_ID = POOL_ID or "<POOL_ID>"
+STAKE_ID = STAKE_ID or "<STAKE_ID>"
 MINT_TAX = MINT_TAX or "0.2"
 MAX_MINT = "210000000000000000000"
 BET2MINT_QUOTA_RATE = BET2MINT_QUOTA_RATE or "0.002"
@@ -103,10 +56,8 @@ LP_HOLDER = LP_HOLDER or "pEPZTnyiF-IDL1NLXPEy_hTy0QjiRNPtQ7SmpnBCA-0"
 -- global tables
 Quota = Quota or {0,0} -- {balance, initial}
 Players = Players or {}
-Stats = Stats or initStats()
 Funds = Funds or {}
 Winners = Winners or {}
--- Pools = Pools or {}
 Sponsors = Sponsors or {}
 TopBettings = TopBettings or {}
 TopMintings = TopMintings or {}
@@ -119,8 +70,9 @@ SyncedInfo = SyncedInfo or {}
 -- bet_to_mint
 local function countBets(uid,quantity,pool)
   assert(type(uid)=="string","Missed user id")
+
   if not Players[uid] then 
-    initUser(uid)
+    utils.initUser(uid)
     utils.increase(Stats,{total_players=1})
   end
   local _tax_rate = pool and tonumber(pool['Tax-Rate']) or 0.4
@@ -169,7 +121,7 @@ local function Mint(count,uid,add_buff)
   assert(type(uid)=="string","Missed user id")
   assert(tonumber(count)>=1,"Missed count")
   if not Players[uid] then 
-    initUser(uid)
+    utils.initUser(uid)
     utils.increase(Stats,{total_players=1})
   end
   local _count = utils.toNumber(count)
@@ -239,6 +191,7 @@ Handlers.add("bet2mint",{
   local _pay_token_id = msg.From
   if not Funds[_pay_token_id] then Funds[_pay_token_id] = 0 end
   utils.increase(Funds,{[_pay_token_id]=utils.toNumber(msg.Quantity)})
+  
   local _pool_id = msg['X-Pool'] or POOL_ID
   local _pool = SyncedInfo[_pool_id]
   local _player = msg['X-Beneficiary'] or msg.Sender
@@ -253,6 +206,7 @@ Handlers.add("bet2mint",{
     Price = _pool.Price,
     Player = _player,
   }
+  
   -- custom note
   if tonumber(msg.Quantity) - _amount >= 100000 and msg['X-Note'] then
     if utils.utf8len(msg['X-Note']) <= 64 then
@@ -321,7 +275,7 @@ Handlers.add("add_faucet_quota",{
   local uid = msg.Account
   local qty = math.min(utils.toNumber(msg.Quantity),2100000000000000)
   if not Players[uid] then 
-    initUser(uid)
+    utils.initUser(uid)
     utils.increase(Stats,{total_players=1})
   end
   utils.increase(Players[uid].faucet,{qty,qty})
@@ -376,6 +330,7 @@ Handlers.add("protocols","Protocols",function (msg)
       facuet_id = FAUCET_ID,
       fundation_id = FUNDATION_ID,
       buybacks_id = BUYBACK_ID,
+      stake_id = STAKE_ID,
       owner_id = Owner,
       details = details
     }
@@ -593,72 +548,72 @@ end)
 
 
 -- dividends
-Handlers.add("distribute-dividends",{
-  From = function (_from) return _from == POOL_ID end,
-  Action = "Distribute-Dividends"
-},function(msg)
-  local dividends = utils.deepCopy(Stats.dividends)
-  local fund = Funds[DEFAULT_PAY_TOKEN_ID]
-  local _supply = utils.toNumber(TotalSupply)
-  assert(fund >= dividends[1],"the actual token amount is less than the dividend amount")
-  assert(_supply > 0, "no holders")
-  local _unit = dividends[1] /  _supply
-  local unpay = {}
-  local _addresses = 0
-  for uid, value in pairs(Balances) do
-    if utils.toNumber(value) > 0 and uid ~= Owner then
-      if uid == LP_ID then 
-        uid = LP_HOLDER 
-      end -- replace LP_ID to LP_HOLDER
-      if not Players[uid] then initUser(uid) end
-      _addresses = _addresses + 1
-      local _amount = _unit * utils.toNumber(value)
-      utils.increase(Players[uid].div,{_amount,_amount,0})
-      utils.decrease(Stats.dividends,{_amount,0,-_amount})
-      if Players[uid].div[1] >= 1 then
-        unpay[uid] = math.floor(Players[uid].div[1])
-      end
-    end
-  end
+-- Handlers.add("distribute-dividends",{
+--   From = function (_from) return _from == POOL_ID end,
+--   Action = "Distribute-Dividends"
+-- },function(msg)
+--   local dividends = utils.deepCopy(Stats.dividends)
+--   local fund = Funds[DEFAULT_PAY_TOKEN_ID]
+--   local _supply = utils.toNumber(TotalSupply)
+--   assert(fund >= dividends[1],"the actual token amount is less than the dividend amount")
+--   assert(_supply > 0, "no holders")
+--   local _unit = dividends[1] /  _supply
+--   local unpay = {}
+--   local _addresses = 0
+--   for uid, value in pairs(Balances) do
+--     if utils.toNumber(value) > 0 and uid ~= Owner then
+--       if uid == LP_ID then 
+--         uid = LP_HOLDER 
+--       end -- replace LP_ID to LP_HOLDER
+--       if not Players[uid] then utils.initUser(uid) end
+--       _addresses = _addresses + 1
+--       local _amount = _unit * utils.toNumber(value)
+--       utils.increase(Players[uid].div,{_amount,_amount,0})
+--       utils.decrease(Stats.dividends,{_amount,0,-_amount})
+--       if Players[uid].div[1] >= 1 then
+--         unpay[uid] = math.floor(Players[uid].div[1])
+--       end
+--     end
+--   end
 
-  utils.increase(Stats,{total_distributed=1})
-  local no = tostring(Stats.total_distributed)
-  msg.reply({
-    Action = "Distributed-Dividends",
-    Amount = tostring(dividends[1]),
-    Addresses = tostring(_addresses),
-    Supply = tostring(_supply),
-    ['Distributed-No'] = no,
-    Data = Stats.dividends
-  })
+--   utils.increase(Stats,{total_distributed=1})
+--   local no = tostring(Stats.total_distributed)
+--   msg.reply({
+--     Action = "Distributed-Dividends",
+--     Amount = tostring(dividends[1]),
+--     Addresses = tostring(_addresses),
+--     Supply = tostring(_supply),
+--     ['Distributed-No'] = no,
+--     Data = Stats.dividends
+--   })
 
-  for _recipient, _qty in pairs(unpay) do
-    Handlers.once("once_disributed_".._recipient.."_"..no,{
-      From = DEFAULT_PAY_TOKEN_ID,
-      Action = "Debit-Notice",
-      ['X-Transfer-Type'] = "Distributed",
-      ['X-Distributed-No'] = no,
-      ['X-Supply'] = tostring(_supply),
-      Recipient = _recipient,
-      Quantity = string.format("%.0f",_qty)
-    },function (msg)
-      local _amount = utils.toNumber(msg.Quantity)
-      utils.decrease(Players[msg.Recipient].div,{_amount,0,-_amount})
-      Funds[msg.From] = Funds[msg.From] - _amount
-    end)
-    Send({
-      Target = DEFAULT_PAY_TOKEN_ID,
-      Action = "Transfer",
-      Recipient = _recipient,
-      Quantity = string.format("%.0f",_qty),
-      ['X-Transfer-Type'] = "Distributed",
-      ['X-Dividends-Total'] = tostring(dividends[1]),
-      ['X-Addresses'] = tostring(_addresses),
-      ['X-Supply'] = tostring(_supply),
-      ['X-Distributed-No'] = no,
-    })
-  end
-end)
+--   for _recipient, _qty in pairs(unpay) do
+--     Handlers.once("once_disributed_".._recipient.."_"..no,{
+--       From = DEFAULT_PAY_TOKEN_ID,
+--       Action = "Debit-Notice",
+--       ['X-Transfer-Type'] = "Distributed",
+--       ['X-Distributed-No'] = no,
+--       ['X-Supply'] = tostring(_supply),
+--       Recipient = _recipient,
+--       Quantity = string.format("%.0f",_qty)
+--     },function (msg)
+--       local _amount = utils.toNumber(msg.Quantity)
+--       utils.decrease(Players[msg.Recipient].div,{_amount,0,-_amount})
+--       Funds[msg.From] = Funds[msg.From] - _amount
+--     end)
+--     Send({
+--       Target = DEFAULT_PAY_TOKEN_ID,
+--       Action = "Transfer",
+--       Recipient = _recipient,
+--       Quantity = string.format("%.0f",_qty),
+--       ['X-Transfer-Type'] = "Distributed",
+--       ['X-Dividends-Total'] = tostring(dividends[1]),
+--       ['X-Addresses'] = tostring(_addresses),
+--       ['X-Supply'] = tostring(_supply),
+--       ['X-Distributed-No'] = no,
+--     })
+--   end
+-- end)
 
 
 Handlers.add("minting-plus",{
@@ -704,4 +659,82 @@ Handlers.add("minting-plus",{
     }
   }
   msg.reply(_message)
+end)
+
+
+Handlers.add("stake_notice",{
+  Action = "Staked-Notice",
+  From = STAKE_ID,
+  Staker = "_",
+  Quantity = "%d+",
+  Beneficiary = "%d+"
+},function (msg)
+  local _staker = msg.Staker
+  if not Players[_staker] then 
+    utils.initUser(_staker)
+    utils.increase(Stats,{total_players=1})
+  end
+  if not Players[_staker].stake then
+    Players[_staker].stake = {0,0,0}
+  end
+  utils.increase(Players[_staker].stake,{tonumber(msg.Quantity),tonumber(msg.Quantity),1})
+  utils.increase(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg.Quantity)})
+end)
+
+
+Handlers.append("unstake_notice",{
+  Action = "Transfer",
+  From = STAKE_ID,
+  ['X-Transfer-Type'] = "Unstake-Notice",
+  ['X-Staker'] = "_",
+},function (msg)
+  local _staker = msg['X-Staker']
+  if not Players[_staker] then 
+    utils.initUser(_staker)
+    utils.increase(Stats,{total_players=1})
+  end
+  if not Players[_staker].stake then
+    Players[_staker].stake = {0,0,0}
+  end
+  utils.decrease(Players[_staker].stake,{tonumber(msg.Quantity),0,1})
+  utils.decrease(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg.Quantity)})
+end)
+
+Handlers.add("stake_check",{
+  Action = "Stake-Checked",
+  From = STAKE_ID,
+  ['Total-Amount'] = "%d+",
+  ['Addresses'] = "%d+"
+},function (msg)
+  local ve = msg.Data
+  local dividends = utils.deepCopy(Stats.dividends)
+  local fund = Funds[DEFAULT_PAY_TOKEN_ID]
+  assert(dividends[1]>=1000000,"The dividend amount must be greater than the minimum dividend amount ($1) 100,000")
+  assert(fund >= dividends[1],"the actual token amount is less than the dividend amount")
+  local _addresses = 0
+  local _supply = utils.toNumber(msg['Total-Amount'])
+  local _unit = dividends[1] /  _supply
+  for uid, value in pairs(ve) do
+    if utils.toNumber(value) > 0 and uid ~= Owner then
+      if uid == LP_ID then 
+        uid = LP_HOLDER 
+      end -- replace LP_ID to LP_HOLDER
+      if not Players[uid] then utils.initUser(uid) end
+      _addresses = _addresses + 1
+      local _amount = _unit * utils.toNumber(value)
+      utils.increase(Players[uid].div,{_amount,_amount,0})
+      utils.decrease(Stats.dividends,{_amount,0,-_amount})
+    end
+  end
+  utils.increase(Stats,{total_distributed=1})
+  local no = tostring(Stats.total_distributed)
+  msg.reply({
+    Action = "Distributed-Dividends",
+    Amount = tostring(dividends[1]),
+    Addresses = tostring(_addresses),
+    Supply = tostring(_supply),
+    ['Distributed-No'] = no,
+    ['Check-Point'] = msg['Check-Point'],
+    Data = Stats.dividends
+  })
 end)

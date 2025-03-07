@@ -1,153 +1,194 @@
 local utils = require("modules.utils")
+local json = require('json')
 
-local initStaker = function (staker)
-  if not Stakers[staker] then
-    Stakers[staker] = {
-      unclaim = 0, -- available to claim
-      stake = {0,0}, -- count,amount
-      yield = {0,0}, -- count,amount
-      redeem = {0,0}, -- count,amount
-      claims = {0,0}, -- count,amount
-      stakings = {} -- active stakings
+STAKE_MIN_DURATION = STAKE_MIN_DURATION or 604800000 -- 7 days
+STAKE_MAX_DURATION = STAKE_MAX_DURATION or 124416000000 -- 4 years
+STAKE_TOKEN = STAKE_TOKEN or "<STAKE_TOKEN>"
+Name = Name or "<NAME>"
+Ticker = Ticker or "<TICKER>"
+Logo = Logo or "bcwIgXwW2C1OMG8paTtDZtAVPp16cOQlvp3_qnS16eg"
+Denomination = Denomination or "<DENOMINATION>"
+
+
+Stakers = Stakers or {} -- key: userAddress val: {amount=100,start_time = 1741059382183, locked_time = 2*366*24*60*60*1000}
+State = State or {
+  stake_amount = {0,0}, -- {balance,total},
+  stakers = 0,
+  latest_stake = 0,
+}
+
+utils.initStaker = function (uid)
+  if not Stakers[uid] then
+    Stakers[uid] = {
+      amount = 0,
+      start_time = nil,
+      locked_time = nil
     }
   end
 end
 
-AESSET = AESSET or "Cge-oWlgN1b1uWR0pMJQmmJh8rV8F2wApd9ig6bDbbM"
-STAKE_TOKEN = STAKE_TOKEN or "Cge-oWlgN1b1uWR0pMJQmmJh8rV8F2wApd9ig6bDbbM"
-YIELD_TOKEN = YIELD_TOKEN or "KCAqEdXfGoWZNhtgPRIL0yGgWlCDUl0gvHu8dnE5EJs"
-
-Name = Name or "stakedALT"
-Ticker = Ticker or "sALT"
-Logo = Logo or "bcwIgXwW2C1OMG8paTtDZtAVPp16cOQlvp3_qnS16eg"
-Denomination = Denomination or 6
-Balances = Balances or {}
-Stakings = Stakings or {}
-UnStakings = UnStakings or {}
-Stakers = Stakers or {}
-Funds = Funds or {}
-Round = Round or 0
-
-local yieldCalc = function (term, quantity)
-  if term >= 16 then
-    return 1 , quantity * 1
-  elseif term >= 8 then
-    return 0.4 , quantity * 0.4
-  elseif term >= 2 then
-    return 0.1 , quantity * 0.1
-  else
-    return 0 , quantity * 0
+utils.sumStakedAmount = function()
+  local total = '0'
+  for _, user in pairs(Stakers) do
+    total = utils.add(total, user.amount)
   end
+  return total
 end
 
--- Handlers.prepend("List-Quests", function (Msg)
---   return Msg.Action == "Test" and "continue"
--- end, function (Msg)
---   print("Test")
--- end)
-
--- Handlers.add("test","Test", function (mag)
---   print("Test 2")
--- end)
-
---[[
-     Info
-   ]]
---
-Handlers.add('info', "Info", function(msg)
-  msg.reply({
-    Name = Name,
-    Ticker = Ticker,
-    Logo = Logo,
-    Denomination = tostring(Denomination)
-  })
-end)
-
-
--- Statke
-Handlers.stake = function (msg)
-  print(msg.Id)
-  local _quantity = tonumber(msg.Quantity)
-  local _from = msg.Sender
-  local _to = msg['X-To'] or msg.Sender
-  local _term = msg['X-Term'] and tonumber(msg['X-Term']) or 16
-  local _yield, _amount = yieldCalc(_term, _quantity)
-  local _stake = {
-    id = msg.Id,
-    from = _from,
-    to = _to,
-    quantity = _quantity,
-    term = _term,
-    yield = _yield,
-    amount = _amount,
-    time = msg.Timestamp,
-    start = Round,
-    expire = Round + _term,
-  }
-  Stakings[msg.Id] = _stake
-  -- table.insert(Stakings,_stake)
-  if not Stakers[_from] then initStaker(_from) end
-  table.insert(Stakers[_from].stakings,_stake.id)
-  utils.increase(Stakers[_from].stake,{1,_stake.amount})
-  if not Balances[_to] then Balances[_to] = 0 end
-  Balances[_to] = Balances[_to] + _amount
-
-  local stakeDebit = {
-    Action = 'Stake-Debit',
-    ['Stake-From'] = _stake.from,
-    ['Stake-To'] = _stake.to,
-    Quantity = msg.Quantity,
-    Data = Colors.gray ..
-        "You transferred " ..
-        Colors.blue .. msg.Quantity .. Colors.gray .. " to " .. Colors.green .. msg.Recipient .. Colors.reset
-  }
-  -- Credit-Notice message template, that is sent to the Recipient of the transfer
-  local stakeCredit = {
-    Target = msg.Recipient,
-    Action = 'Stake-Credit',
-    Sender = msg.From,
-    Quantity = msg.Quantity,
-    Data = Colors.gray ..
-        "You received " ..
-        Colors.blue .. msg.Quantity .. Colors.gray .. " from " .. Colors.green .. msg.From .. Colors.reset
-  }
-
-  -- Add forwarded tags to the credit and debit notice messages
-  for tagName, tagValue in pairs(msg) do
-    -- Tags beginning with "X-" are forwarded
-    if string.sub(tagName, 1, 2) == "X-" then
-      debitNotice[tagName] = tagValue
-      creditNotice[tagName] = tagValue
-    end
+utils.veBalance = function(uid, ts)
+  local user = Stakers[uid]
+  if not user then
+      return '0'
   end
-  
+
+  local left_time = user.locked_time - (ts - user.start_time)
+  if left_time <= 0 then
+      return '0'
+  end
+
+  -- local a = utils.multiply(string.format("%.0f", user.amount), left_time)
+  -- local b = utils.divide(a, STAKE_MAX_DURATION)
+  local result = user.amount * (left_time / STAKE_MAX_DURATION)
+  return string.format("%.0f", result)
+end
+
+utils.getBalances = function(ts)
+  local balances = {}
+  for address in pairs(Stakers) do
+      local bal = utils.veBalance(address, ts)
+      balances[address] = bal
+  end
+  return balances
+end
+
+utils.totalSupply = function(ts)
+  local balances = utils.getBalances(ts)
+  local totalSupply = '0'
+  for _, bal in pairs(balances) do
+      totalSupply = utils.add(totalSupply, bal)
+  end
+  return totalSupply
+end
+
+utils.calUnstakeAmount = function (uid , ts)
+  local staker = Stakers[uid]
+  local r = math.min((ts - staker.start_time) / STAKE_MAX_DURATION,0)
+  return math.floor(staker.amount * r), math.floor(staker.amount * (1-r))
 end
 
 Handlers.add("stake",{
-  From = STAKE_TOKEN,
   Action = "Credit-Notice",
+  From = function (_from) return _from == STAKE_TOKEN end,
   ['X-Transfer-Type'] = "Stake",
-  Quantity = function (_q,msg)
-    return tonumber(msg.Quantity) >= 1000000000000
+  ['X-Locked-Time'] = "%d+",
+  Quantity = "%d+"
+}, function(msg)
+  assert(tonumber(msg.Quantity)>=1,"The stake amount must be greater than or equal to 1")
+  local start_time = msg.Timestamp
+  local locked_time = math.max(tonumber(msg['X-Locked-Time']),STAKE_MIN_DURATION)
+  if not Stakers[msg.Sender] then 
+    utils.initStaker(msg.Sender)
+    utils.increase(State,{stakers=1})
   end
-},Handlers.stake)
+  utils.increase(Stakers[msg.Sender],{amount = tonumber(msg.Quantity)})
+  utils.increase(State,{stake_amount = tonumber(msg.Quantity)})
+  utils.update(Stakers[msg.Sender],{start_time = start_time,locked_time = locked_time})
+  utils.update(State,{latest_stake = msg.Timestamp})
+  local tags = {
+    Action = "Staked",
+    Quantity = msg.Quantity,
+    Staker = msg.Sender,
+    ['Asset-Id'] = msg.From,
+    ['Start-Time'] = tostring(start_time),
+    ['Locked-Time'] = tostring(locked_time),
+    ['Pushed-For'] = msg['Pushed-For'],
+    Data = {msg.Quantity,start_time,locked_time}
+  }
+  
+  msg.reply(tags)
+  tags.Target = msg.Sender
+  Send(tags)
+  
+end)
 
--- Redeem
-Handlers.redeem = function (msg)
-  print("Redeem")
-end
 
-Handlers.add("redeem",{Action="Redeem"},Handlers.redeem)
+Handlers.add("unstake",{
+  Action = "Unstake",
+},function(msg)
+  assert(Stakers[msg.From]~=nil,"Staker not exist!")
+  assert(Stakers[msg.From].amount >= 0, "Insufficient amount")
+  local released, unreleased = utils.calUnstakeAmount(msg.From, msg.Timestamp)
+  if released >= 1 then
+    Send({
+      Target = STAKE_TOKEN,
+      Action = "Transfer",
+      Recipient = msg.From,
+      Quantity = string.format("%.0f", released),
+      ['X-Transfer-Type'] = "Unstake",
+      ['Pushed-For'] = msg['Pushed-For']
+    })
+  end
 
+  if unreleased >= 1 then
+    Send({
+      Target = STAKE_TOKEN,
+      Action = "Burn",
+      Quantity = string.format("%.0f", released),
+    })
+  end
 
--- Queries
+  utils.decrease(State,{stake_amount = Stakers[msg.From].amount,stakers = 1})
+  utils.update(State,{latest_unstake = msg.Timestamp})
+  Stakers[msg.From] = nil
+  
 
-Handlers.add("get-staker",{
-  Action="Get-Stakers",
-  ['Staker-Id'] = "_"
-},function (msg)
-  local uid = msg['Staker-Id'] or msg.From
-  local _data = utils.deepCopy(Stakers[uid])
-  _data.balance = Balances[msg['Staker-Id']]
-  msg.reply({Data = _data})
+end)
+
+Handlers.add("balances", "Balances", function(msg)
+  local Balances = utils.getBalances(msg.Timestamp)
+  msg.reply({
+      Data = json.encode(Balances)
+  })
+end)
+
+Handlers.add("balance", "Balance", function(msg)
+  local Balances = utils.getBalances(msg.Timestamp)
+
+  local bal = '0'
+  -- If not Recipient is provided, then return the Senders balance
+  if (msg.Tags.Recipient) then
+      if (Balances[msg.Tags.Recipient]) then
+          bal = Balances[msg.Tags.Recipient]
+      end
+  elseif msg.Tags.Target and Balances[msg.Tags.Target] then
+      bal = Balances[msg.Tags.Target]
+  elseif Balances[msg.From] then
+      bal = Balances[msg.From]
+  end
+
+  msg.reply({
+      Balance = bal,
+      Ticker = Ticker,
+      Account = msg.Tags.Recipient or msg.From,
+      Data = bal
+  })
+end)
+
+Handlers.add("info", "Info", function(msg)
+  msg.reply({
+      Name = Name,
+      Ticker = Ticker,
+      Logo = Logo,
+      Denomination = tostring(Denomination),
+      Staked = utils.sumStakedAmount(),
+      TotalSupply = utils.totalSupply(msg.Timestamp)
+  })
+end)
+
+Handlers.add("state","State",function (msg)
+  local _state = utils.deepCopy(State)
+  _state.total_supply = utils.totalSupply(msg.Timestamp)
+  msg.reply({
+    Data = _state
+  })
 end)

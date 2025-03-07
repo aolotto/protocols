@@ -272,60 +272,85 @@ Handlers.add("get",{Action = "Get"},{
 
 
 
-Handlers.add("Cron",function(msg)
+Handlers.add("Cron",{
+  Action = "Cron",
+  From = Owner
+},function(msg)
   assert(State.run == 1,"the pool is paused")
-  -- print("cron "..msg.Timestamp)
   if msg.Timestamp >= State.ts_latest_draw and State.ts_latest_draw > 0 and #Bets > 0 then
     if not Archive and ARCHIVE_LOCKER == false then
       Handlers.archive() -- triger to switch round
     end
-     
+  -- dividends   
   end
-  if Dividends[1] >= DIVDIDEND_LIMIT and DIVIDEND_LOCKER == false then
-    Handlers.distribute() -- triger to distribute dividends
-  end
+  -- if Dividends[1] >= DIVDIDEND_LIMIT and DIVIDEND_LOCKER == false then
+  --   Handlers.distribute() -- triger to distribute dividends
+  -- end
 
+  -- gap_rewards
   if msg.Timestamp - math.max(State.ts_latest_bet,State.latest_minting_plus) >= MINTING_PLUS_DUR and #Bets > 0 and State.ts_round_start>0 and MINTING_PLUS_LOCKER==false then
     local mint_time = math.max(State.ts_latest_bet,State.latest_minting_plus) + MINTING_PLUS_DUR
     print("Minting plus triger ->"..msg.Timestamp.."/"..mint_time.."-> diff:".. msg.Timestamp - mint_time)
     Handlers.mintingPlus(mint_time)
   end
+
+  -- auto draw
+  if Archive and Archive.id and Archive.archived_id and Archive.block_height ~= nil and msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT and DRAW_LOCKER == false then
+    Archive.draw_height = Archive.block_height + DRAW_DIFF_BLOCKHEIGHT
+    Handlers.draw(Archive)
+  end
+
 end)
 
 
 Handlers.draw = function(archive)
   assert(archive~=nil,"no archived round to draw")
   DRAW_LOCKER = true
-  local draw_time = archive.draw_time or os.time()
-  local archive_id = archive.id
-  local archived_id = archive.archived_id or ao.id
+  local archive_id = archive.id or Archive.id
+  local archived_id = archive.archived_id or Archive.archived_id
   local state = archive.state or Archive.state
   local bets = archive.bets or Archive.bets
   local numbers = archive.numbers or Archive.numbers
   local latest_bet = bets[#bets]
   local block = drive.getBlock(archive.block_height+DRAW_DIFF_BLOCKHEIGHT or archive.draw_height or 1581160)
+  local draw_time = block.timestamp * 1000
   local seed = block.indep_hash ..'_'..archive_id..'_'..archived_id.."_"..latest_bet.id.."_"..tostring(draw_time)
   local lucky_number = utils.getDrawNumber(seed,DIGITS or 3)
   local jackpot = state.jackpot
 
   print("lucky_number:"..lucky_number)
 
+  
+
   local matched = numbers[lucky_number] or 0
   local reward_type = matched > 0 and "MATCHED" or "FINAL_BET"
+
+  local latest_bet_reward = 0
+  local winner_reward = jackpot
+  if state.bet[2] < state.wager_limit then
+    latest_bet_reward = jackpot * math.max(1 - state.bet[2]/state.wager_limit,0.01)
+    winner_reward = jackpot - latest_bet_reward
+  end
+
   local tax_rate = TAXRATE
   local taxation = jackpot * tax_rate
+
   print(jackpot.."-"..taxation.."-"..tax_rate)
   -- filter win bets
   local rewards = {}
   if matched > 0 then
-    local _share = jackpot / matched
+    local _share = winner_reward / matched
     for i,bet in ipairs(bets) do
       if bet.x_numbers == lucky_number then
         utils.increase(rewards,{[bet.player]=bet.count * _share})
       end
     end
   else
-    rewards[latest_bet.player] = jackpot
+    rewards[latest_bet.player] = winner_reward
+  end
+
+  if latest_bet_reward > 0 then
+    rewards[latest_bet.player] = rewards[latest_bet.player] + latest_bet_reward
   end
   -- count winners
   local winners = 0
@@ -341,7 +366,7 @@ Handlers.draw = function(archive)
     winners = winners,
     matched = matched,
     reward_type = reward_type,
-    created = archive.time_stamp,
+    created = os.time(),
     bet = state.bet,
     block_hash = block.indep_hash,
     taxation = taxation,
@@ -351,7 +376,9 @@ Handlers.draw = function(archive)
     latest_bet_id = latest_bet.id,
     seed = seed,
     draw_height = block.height,
-    draw_time = draw_time
+    draw_time = draw_time,
+    latest_bet_reward = latest_bet_reward,
+    winner_reward = winner_reward
   }
   local draw_notice = {
     Target = AGENT,
@@ -367,10 +394,13 @@ Handlers.draw = function(archive)
     Token = archive.token.id,
     Ticker = archive.token.ticker,
     Denomination = archive.token.denomination,
-    Created = tostring(draw_time or os.time()),
+    Created = tostring(os.time()),
+    ['Draw-Time'] = tostring(draw_time or os.time()),
     ['Lucky-Number'] = tostring(draw.lucky_number),
     ['Reward-Type'] = reward_type,
     Bet = table.concat(state.bet,","),
+    ['Latest-Bet-Reward'] = tostring(latest_bet_reward),
+    ['Winner-Reward'] = tostring(winner_reward),
     Data = draw
   }
   Send(draw_notice).onReply(function (msg)
@@ -393,7 +423,6 @@ Handlers.add("draw",{
   assert(Archive.archived_id ~= nil, "not archived")
   assert(Archive.block_height ~= nil and msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT , "not reach the draw_block")
   if msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT and DRAW_LOCKER == false then
-    Archive.draw_time = msg.Timestamp
     Archive.draw_height = Archive.block_height + DRAW_DIFF_BLOCKHEIGHT
     Handlers.draw(Archive)
   end
@@ -420,11 +449,13 @@ Handlers.archive = function()
     local jackpot = balance * JACKPOT_SCALE
     local wager_limit = math.max(State.wager_limit, PRICE * 1000 + jackpot )
     local round = State.round + 1
+    local initial_balance = balance
     utils.update(State,{
+      run = 0,
       picks = 0,
       bet = {0,0,0},
       players = 0,
-      ts_round_start = os.time(),
+      ts_round_start = 0,
       ts_latest_bet = 0,
       round = round,
       balance = balance,
@@ -433,7 +464,8 @@ Handlers.archive = function()
       ts_round_end = 0,
       ts_latest_draw = 0,
       latest_minting_plus = 0,
-      minting_plus = {0,0}
+      minting_plus = {0,0},
+      initial_balance = balance
     })
     print("Round switch to "..State.round)
   end
@@ -448,7 +480,11 @@ Handlers.archive = function()
     Archive.block_height = m['Block-Height']
     Archive.time_stamp = m.Timestamp
     Archive.token = m.Data.token
-    utils.update(State,{minting = m.Data.minting})
+    utils.update(State,{
+      minting = m.Data.minting,
+      run = 1,
+      ts_round_start = m.Timestamp,
+    })
     ARCHIVE_LOCKER = false
   end)
   ARCHIVE_LOCKER = true
