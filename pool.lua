@@ -186,20 +186,6 @@ Handlers.add("save-ticket",{
 end)
 
 
-Handlers.add("get",{Action = "Get"},{
-  [{Table = "Bets"}] = function(msg)
-    msg.reply({
-      Total= tostring(#Bets),
-      Data= utils.query(Bets,tonumber(msg.Limit) or 100,tonumber(msg.Offset) or 1,{"ts_created","desc"})
-    }) 
-  end,
-  [{Table = "Draws"}] = function(msg)
-    msg.reply({
-      Total= tostring(#Draws),
-      Data= utils.query(Draws,tonumber(msg.Limit) or 100,tonumber(msg.Offset) or 1,{"ts_draw","desc"})
-    }) 
-  end
-})
 
 Handlers.add("query",{Action="Query"},{
   [{Table = "Bets",['Query-Id']="_"}] = function(msg)
@@ -274,18 +260,22 @@ Handlers.add("get",{Action = "Get"},{
 
 Handlers.add("Cron",{
   Action = "Cron",
-  From = Owner
+  From = function (from) return from == Owner or ao.id end
 },function(msg)
+  -- print("Cron")
   assert(State.run == 1,"the pool is paused")
   if msg.Timestamp >= State.ts_latest_draw and State.ts_latest_draw > 0 and #Bets > 0 then
-    if not Archive and ARCHIVE_LOCKER == false then
-      Handlers.archive() -- triger to switch round
-    end
-  -- dividends   
+    if not Archive and ARCHIVE_LOCKER == false then Handlers.archive() end
   end
-  -- if Dividends[1] >= DIVDIDEND_LIMIT and DIVIDEND_LOCKER == false then
-  --   Handlers.distribute() -- triger to distribute dividends
-  -- end
+
+  -- dividends   
+  if State.ts_next_dividend and msg.Timestamp >= State.ts_next_dividend then
+    State.ts_next_dividend = msg.Timestamp + 24 * 60 * 60 * 1000
+    Send({
+      Target = AGENT,
+      Action = "Distribute-Dividends",
+    })
+  end
 
   -- gap_rewards
   if msg.Timestamp - math.max(State.ts_latest_bet,State.latest_minting_plus) >= MINTING_PLUS_DUR and #Bets > 0 and State.ts_round_start>0 and MINTING_PLUS_LOCKER==false then
@@ -447,9 +437,8 @@ Handlers.archive = function()
     GapRewards = {}
     local balance = State.balance - State.jackpot
     local jackpot = balance * JACKPOT_SCALE
-    local wager_limit = math.max(State.wager_limit, PRICE * 1000 + jackpot )
     local round = State.round + 1
-    local initial_balance = balance
+    local wager_limit = math.floor(math.max(State.wager_limit+PRICE*100, PRICE*1000*(1+round/10)))
     utils.update(State,{
       run = 0,
       picks = 0,

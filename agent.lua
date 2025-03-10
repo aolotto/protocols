@@ -548,72 +548,72 @@ end)
 
 
 -- dividends
--- Handlers.add("distribute-dividends",{
---   From = function (_from) return _from == POOL_ID end,
---   Action = "Distribute-Dividends"
--- },function(msg)
---   local dividends = utils.deepCopy(Stats.dividends)
---   local fund = Funds[DEFAULT_PAY_TOKEN_ID]
---   local _supply = utils.toNumber(TotalSupply)
---   assert(fund >= dividends[1],"the actual token amount is less than the dividend amount")
---   assert(_supply > 0, "no holders")
---   local _unit = dividends[1] /  _supply
---   local unpay = {}
---   local _addresses = 0
---   for uid, value in pairs(Balances) do
---     if utils.toNumber(value) > 0 and uid ~= Owner then
---       if uid == LP_ID then 
---         uid = LP_HOLDER 
---       end -- replace LP_ID to LP_HOLDER
---       if not Players[uid] then utils.initUser(uid) end
---       _addresses = _addresses + 1
---       local _amount = _unit * utils.toNumber(value)
---       utils.increase(Players[uid].div,{_amount,_amount,0})
---       utils.decrease(Stats.dividends,{_amount,0,-_amount})
---       if Players[uid].div[1] >= 1 then
---         unpay[uid] = math.floor(Players[uid].div[1])
---       end
---     end
---   end
+Handlers.add("distribute-dividends",{
+  From = function (_from) return _from == POOL_ID end,
+  Action = "Distribute-Dividends"
+},function(msg)
+  local dividends = utils.deepCopy(Stats.dividends)
+  local fund = Funds[DEFAULT_PAY_TOKEN_ID]
+  local _supply = utils.toNumber(TotalSupply)
+  assert(fund >= dividends[1],"the actual token amount is less than the dividend amount")
+  assert(_supply > 0, "no holders")
+  local _unit = dividends[1] /  _supply
+  local unpay = {}
+  local _addresses = 0
+  for uid, value in pairs(Balances) do
+    if utils.toNumber(value) > 0 and uid ~= Owner then
+      if uid == LP_ID then 
+        uid = LP_HOLDER 
+      end -- replace LP_ID to LP_HOLDER
+      if not Players[uid] then utils.initUser(uid) end
+      _addresses = _addresses + 1
+      local _amount = _unit * utils.toNumber(value)
+      utils.increase(Players[uid].div,{_amount,_amount,0})
+      utils.decrease(Stats.dividends,{_amount,0,-_amount})
+      if Players[uid].div[1] >= 1 then
+        unpay[uid] = math.floor(Players[uid].div[1])
+      end
+    end
+  end
 
---   utils.increase(Stats,{total_distributed=1})
---   local no = tostring(Stats.total_distributed)
---   msg.reply({
---     Action = "Distributed-Dividends",
---     Amount = tostring(dividends[1]),
---     Addresses = tostring(_addresses),
---     Supply = tostring(_supply),
---     ['Distributed-No'] = no,
---     Data = Stats.dividends
---   })
+  utils.increase(Stats,{total_distributed=1})
+  local no = tostring(Stats.total_distributed)
+  msg.reply({
+    Action = "Distributed-Dividends",
+    Amount = tostring(dividends[1]),
+    Addresses = tostring(_addresses),
+    Supply = tostring(_supply),
+    ['Distributed-No'] = no,
+    Data = Stats.dividends
+  })
 
---   for _recipient, _qty in pairs(unpay) do
---     Handlers.once("once_disributed_".._recipient.."_"..no,{
---       From = DEFAULT_PAY_TOKEN_ID,
---       Action = "Debit-Notice",
---       ['X-Transfer-Type'] = "Distributed",
---       ['X-Distributed-No'] = no,
---       ['X-Supply'] = tostring(_supply),
---       Recipient = _recipient,
---       Quantity = string.format("%.0f",_qty)
---     },function (msg)
---       local _amount = utils.toNumber(msg.Quantity)
---       utils.decrease(Players[msg.Recipient].div,{_amount,0,-_amount})
---       Funds[msg.From] = Funds[msg.From] - _amount
---     end)
---     Send({
---       Target = DEFAULT_PAY_TOKEN_ID,
---       Action = "Transfer",
---       Recipient = _recipient,
---       Quantity = string.format("%.0f",_qty),
---       ['X-Transfer-Type'] = "Distributed",
---       ['X-Dividends-Total'] = tostring(dividends[1]),
---       ['X-Addresses'] = tostring(_addresses),
---       ['X-Supply'] = tostring(_supply),
---       ['X-Distributed-No'] = no,
---     })
---   end
--- end)
+  for _recipient, _qty in pairs(unpay) do
+    Handlers.once("once_disributed_".._recipient.."_"..no,{
+      From = DEFAULT_PAY_TOKEN_ID,
+      Action = "Debit-Notice",
+      ['X-Transfer-Type'] = "Distributed",
+      ['X-Distributed-No'] = no,
+      ['X-Supply'] = tostring(_supply),
+      Recipient = _recipient,
+      Quantity = string.format("%.0f",_qty)
+    },function (msg)
+      local _amount = utils.toNumber(msg.Quantity)
+      utils.decrease(Players[msg.Recipient].div,{_amount,0,-_amount})
+      Funds[msg.From] = Funds[msg.From] - _amount
+    end)
+    Send({
+      Target = DEFAULT_PAY_TOKEN_ID,
+      Action = "Transfer",
+      Recipient = _recipient,
+      Quantity = string.format("%.0f",_qty),
+      ['X-Transfer-Type'] = "Distributed",
+      ['X-Dividends-Total'] = tostring(dividends[1]),
+      ['X-Addresses'] = tostring(_addresses),
+      ['X-Supply'] = tostring(_supply),
+      ['X-Distributed-No'] = no,
+    })
+  end
+end)
 
 
 Handlers.add("minting-plus",{
@@ -663,11 +663,10 @@ end)
 
 
 Handlers.add("stake_notice",{
-  Action = "Staked-Notice",
+  Action = "Staked",
   From = STAKE_ID,
   Staker = "_",
   Quantity = "%d+",
-  Beneficiary = "%d+"
 },function (msg)
   local _staker = msg.Staker
   if not Players[_staker] then 
@@ -685,56 +684,79 @@ end)
 Handlers.append("unstake_notice",{
   Action = "Transfer",
   From = STAKE_ID,
-  ['X-Transfer-Type'] = "Unstake-Notice",
+  ['X-Transfer-Type'] = "Unstaked",
   ['X-Staker'] = "_",
+  ['X-Unstake-Amount'] = "%d+"
 },function (msg)
   local _staker = msg['X-Staker']
-  if not Players[_staker] then 
+  print("Unstaked")
+  if not Players[_staker] then
     utils.initUser(_staker)
     utils.increase(Stats,{total_players=1})
   end
   if not Players[_staker].stake then
     Players[_staker].stake = {0,0,0}
   end
-  utils.decrease(Players[_staker].stake,{tonumber(msg.Quantity),0,1})
-  utils.decrease(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg.Quantity)})
+  utils.decrease(Players[_staker].stake,{tonumber(msg['X-Unstake-Amount']),0,1})
+  utils.decrease(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg['X-Unstake-Amount'])})
 end)
 
-Handlers.add("stake_check",{
-  Action = "Stake-Checked",
-  From = STAKE_ID,
-  ['Total-Amount'] = "%d+",
-  ['Addresses'] = "%d+"
+-- Handlers.add("stake_check",{
+--   Action = "Stake-Checked",
+--   From = STAKE_ID,
+--   ['Total-Amount'] = "%d+",
+--   ['Addresses'] = "%d+"
+-- },function (msg)
+--   local ve = msg.Data
+--   local dividends = utils.deepCopy(Stats.dividends)
+--   local fund = Funds[DEFAULT_PAY_TOKEN_ID]
+--   assert(dividends[1]>=1000000,"The dividend amount must be greater than the minimum dividend amount ($1) 100,000")
+--   assert(fund >= dividends[1],"the actual token amount is less than the dividend amount")
+--   local _addresses = 0
+--   local _supply = utils.toNumber(msg['Total-Amount'])
+--   local _unit = dividends[1] /  _supply
+--   for uid, value in pairs(ve) do
+--     if utils.toNumber(value) > 0 and uid ~= Owner then
+--       if uid == LP_ID then 
+--         uid = LP_HOLDER 
+--       end -- replace LP_ID to LP_HOLDER
+--       if not Players[uid] then utils.initUser(uid) end
+--       _addresses = _addresses + 1
+--       local _amount = _unit * utils.toNumber(value)
+--       utils.increase(Players[uid].div,{_amount,_amount,0})
+--       utils.decrease(Stats.dividends,{_amount,0,-_amount})
+--     end
+--   end
+--   utils.increase(Stats,{total_distributed=1})
+--   local no = tostring(Stats.total_distributed)
+--   msg.reply({
+--     Action = "Distributed-Dividends",
+--     Amount = tostring(dividends[1]),
+--     Addresses = tostring(_addresses),
+--     Supply = tostring(_supply),
+--     ['Distributed-No'] = no,
+--     ['Check-Point'] = msg['Check-Point'],
+--     Data = Stats.dividends
+--   })
+-- end)
+
+
+Handlers.add("dividends",{
+  Action="Distribute-Dividends",
+  From = POOL_ID
 },function (msg)
-  local ve = msg.Data
-  local dividends = utils.deepCopy(Stats.dividends)
-  local fund = Funds[DEFAULT_PAY_TOKEN_ID]
-  assert(dividends[1]>=1000000,"The dividend amount must be greater than the minimum dividend amount ($1) 100,000")
-  assert(fund >= dividends[1],"the actual token amount is less than the dividend amount")
-  local _addresses = 0
-  local _supply = utils.toNumber(msg['Total-Amount'])
-  local _unit = dividends[1] /  _supply
-  for uid, value in pairs(ve) do
-    if utils.toNumber(value) > 0 and uid ~= Owner then
-      if uid == LP_ID then 
-        uid = LP_HOLDER 
-      end -- replace LP_ID to LP_HOLDER
-      if not Players[uid] then utils.initUser(uid) end
-      _addresses = _addresses + 1
-      local _amount = _unit * utils.toNumber(value)
-      utils.increase(Players[uid].div,{_amount,_amount,0})
-      utils.decrease(Stats.dividends,{_amount,0,-_amount})
+  Send({
+    Target = STAKE_ID,
+    Action = "Balances"
+  }).onReply(function (m)
+    local total = m.Total
+    local balances = m.Data
+    local divedends = Stats.dividends[1]
+    local unit = utils.divide(divedends,total)
+    print(unit)
+    for uid, value in pairs(balances) do
+      local div = unit * tonumber(value)
+      print(uid .. " > " .. div)
     end
-  end
-  utils.increase(Stats,{total_distributed=1})
-  local no = tostring(Stats.total_distributed)
-  msg.reply({
-    Action = "Distributed-Dividends",
-    Amount = tostring(dividends[1]),
-    Addresses = tostring(_addresses),
-    Supply = tostring(_supply),
-    ['Distributed-No'] = no,
-    ['Check-Point'] = msg['Check-Point'],
-    Data = Stats.dividends
-  })
+  end)
 end)

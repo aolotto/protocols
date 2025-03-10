@@ -16,6 +16,7 @@ State = State or {
   stakers = 0,
   latest_stake = 0,
 }
+Funds = Funds or  {}
 
 utils.initStaker = function (uid)
   if not Stakers[uid] then
@@ -46,19 +47,19 @@ utils.veBalance = function(uid, ts)
       return '0'
   end
 
-  -- local a = utils.multiply(string.format("%.0f", user.amount), left_time)
-  -- local b = utils.divide(a, STAKE_MAX_DURATION)
-  local result = user.amount * (left_time / STAKE_MAX_DURATION)
+  local result = user.amount * math.max(left_time / STAKE_MAX_DURATION,1)
   return string.format("%.0f", result)
 end
 
 utils.getBalances = function(ts)
+  local total = "0"
   local balances = {}
   for address in pairs(Stakers) do
       local bal = utils.veBalance(address, ts)
       balances[address] = bal
+      total = utils.add(total,bal)
   end
-  return balances
+  return balances, total
 end
 
 utils.totalSupply = function(ts)
@@ -70,9 +71,9 @@ utils.totalSupply = function(ts)
   return totalSupply
 end
 
-utils.calUnstakeAmount = function (uid , ts)
+utils.calUnstakeAmount = function (uid,ts)
   local staker = Stakers[uid]
-  local r = math.min((ts - staker.start_time) / STAKE_MAX_DURATION,0)
+  local r = math.min((ts - staker.start_time) / staker.locked_time,1)
   return math.floor(staker.amount * r), math.floor(staker.amount * (1-r))
 end
 
@@ -91,7 +92,7 @@ Handlers.add("stake",{
     utils.increase(State,{stakers=1})
   end
   utils.increase(Stakers[msg.Sender],{amount = tonumber(msg.Quantity)})
-  utils.increase(State,{stake_amount = tonumber(msg.Quantity)})
+  utils.increase(State.stake_amount,{tonumber(msg.Quantity),tonumber(msg.Quantity)})
   utils.update(Stakers[msg.Sender],{start_time = start_time,locked_time = locked_time})
   utils.update(State,{latest_stake = msg.Timestamp})
   local tags = {
@@ -117,42 +118,54 @@ Handlers.add("unstake",{
 },function(msg)
   assert(Stakers[msg.From]~=nil,"Staker not exist!")
   assert(Stakers[msg.From].amount >= 0, "Insufficient amount")
-  local released, unreleased = utils.calUnstakeAmount(msg.From, msg.Timestamp)
-  if released >= 1 then
-    Send({
+  local refund, burn = utils.calUnstakeAmount(msg.From, msg.Timestamp)
+  assert(refund >= 1, "The amount must be greater than 1")
+  if refund >= 1 then
+    print("refund:"..refund)
+    local msg_stake = {
       Target = STAKE_TOKEN,
       Action = "Transfer",
       Recipient = msg.From,
-      Quantity = string.format("%.0f", released),
-      ['X-Transfer-Type'] = "Unstake",
-      ['Pushed-For'] = msg['Pushed-For']
-    })
+      Quantity = string.format("%.0f", refund),
+      ['X-Transfer-Type'] = "Unstaked",
+      ['X-Unstake-Amount'] = string.format("%.0f", Stakers[msg.From].amount),
+      ['X-Staker'] = msg.From
+    }
+    print(msg_stake)
+    Send(msg_stake)
   end
 
-  if unreleased >= 1 then
-    Send({
+  if burn >= 1 then
+    print("burn:"..burn)
+    local msg_burn = {
       Target = STAKE_TOKEN,
       Action = "Burn",
-      Quantity = string.format("%.0f", released),
-    })
+      Quantity = string.format("%.0f", burn),
+    }
+    print(msg_burn)
+    Send(msg_burn).onReply(function (m)
+      utils.increase(State,{burned = burn})
+    end)
+    
   end
 
-  utils.decrease(State,{stake_amount = Stakers[msg.From].amount,stakers = 1})
+  utils.decrease(State.stake_amount,{Stakers[msg.From].amount,0})
+  utils.decrease(State,{stakers = 1})
   utils.update(State,{latest_unstake = msg.Timestamp})
   Stakers[msg.From] = nil
-  
 
 end)
 
 Handlers.add("balances", "Balances", function(msg)
-  local Balances = utils.getBalances(msg.Timestamp)
+  local Balances, Total = utils.getBalances(msg.Timestamp)
   msg.reply({
+      Total = Total,
       Data = json.encode(Balances)
   })
 end)
 
 Handlers.add("balance", "Balance", function(msg)
-  local Balances = utils.getBalances(msg.Timestamp)
+  local Balances,Total = utils.getBalances(msg.Timestamp)
 
   local bal = '0'
   -- If not Recipient is provided, then return the Senders balance
@@ -167,6 +180,7 @@ Handlers.add("balance", "Balance", function(msg)
   end
 
   msg.reply({
+      Total = Total,
       Balance = bal,
       Ticker = Ticker,
       Account = msg.Tags.Recipient or msg.From,
@@ -191,4 +205,50 @@ Handlers.add("state","State",function (msg)
   msg.reply({
     Data = _state
   })
+end)
+
+
+
+
+Handlers.add("get",{
+  Action = "Get"
+},{
+  [{Tab="Stakers",['Address'] = "_"}] = function (msg)
+    assert(Stakers[msg.Address]~=nil,"the staker does not exist")
+    local staker = Stakers[msg.Address]
+    staker.balance = utils.veBalance(msg.Address,msg.Timestamp)
+    msg.reply({
+      Action="Getted",
+      Tab = "Stakers",
+      Data = Stakers[msg.Address]
+    })
+  end
+})
+
+
+
+Handlers.prepend("cash_flow", function (msg) return "continue" end, function (msg)
+  if msg.Action == "Credit-Notice" or msg.Action == "Debit-Notice" then
+    print("cashFlow")
+    if not Funds then Funds = {} end
+    if not Funds[msg.From] then 
+      Funds[msg.From] = {
+        bal=0,
+        income=0,
+        outcome=0
+      }
+    end
+    utils.increase(Funds[msg.From],{
+      bal = msg.Action == "Credit-Notice" and tonumber(msg.Quantity) or -tonumber(msg.Quantity),
+      income = msg.Action == "Credit-Notice" and tonumber(msg.Quantity) or 0,
+      outcome = msg.Action == "Debit-Notice" and tonumber(msg.Quantity) or 0
+    })
+  end
+end)
+
+
+Handlers.add("test","Test",function (msg)
+  local refund, burn = utils.calUnstakeAmount("TrnCnIGq1tx8TV8NA7L2ejJJmrywtwRfq9Q7yNV6g2A", msg.Timestamp)
+  print("refund : "..refund)
+  print("burn : "..burn)
 end)
