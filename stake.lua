@@ -42,12 +42,12 @@ utils.veBalance = function(uid, ts)
       return '0'
   end
 
-  local left_time = user.locked_time - (ts - user.start_time)
+  local left_time = math.max(user.locked_time - (ts - user.start_time),0)
   if left_time <= 0 then
       return '0'
   end
 
-  local result = user.amount * math.max(left_time / STAKE_MAX_DURATION,1)
+  local result = user.amount * math.min(left_time / STAKE_MAX_DURATION,1)
   return string.format("%.0f", result)
 end
 
@@ -84,19 +84,24 @@ Handlers.add("stake",{
   ['X-Locked-Time'] = "%d+",
   Quantity = "%d+"
 }, function(msg)
+  print("Stake")
   assert(tonumber(msg.Quantity)>=1,"The stake amount must be greater than or equal to 1")
   local start_time = msg.Timestamp
-  local locked_time = math.max(tonumber(msg['X-Locked-Time']),STAKE_MIN_DURATION)
+  local new_locked_time = math.max(tonumber(msg['X-Locked-Time']),STAKE_MIN_DURATION)
+  local locked_time
   if not Stakers[msg.Sender] then 
     utils.initStaker(msg.Sender)
     utils.increase(State,{stakers=1})
+    locked_time = new_locked_time
+  else
+    locked_time = math.max(new_locked_time or STAKE_MIN_DURATION,Stakers[msg.Sender].locked_time)
   end
+  
   utils.increase(Stakers[msg.Sender],{amount = tonumber(msg.Quantity)})
   utils.increase(State.stake_amount,{tonumber(msg.Quantity),tonumber(msg.Quantity)})
   utils.update(Stakers[msg.Sender],{start_time = start_time,locked_time = locked_time})
   utils.update(State,{latest_stake = msg.Timestamp})
   local tags = {
-    Action = "Staked",
     Quantity = msg.Quantity,
     Staker = msg.Sender,
     ['Asset-Id'] = msg.From,
@@ -105,10 +110,13 @@ Handlers.add("stake",{
     ['Pushed-For'] = msg['Pushed-For'],
     Data = {msg.Quantity,start_time,locked_time}
   }
-  
-  msg.reply(tags)
-  tags.Target = msg.Sender
-  Send(tags)
+  local stake_notice = utils.deepCopy(tags)
+  stake_notice.Action = "Stake-Notice"
+  msg.reply(stake_notice)
+  local staked = utils.deepCopy(tags)
+  staked.Action = "Staked"
+  staked.Target = msg.Sender
+  Send(staked)
   
 end)
 
@@ -215,12 +223,13 @@ Handlers.add("get",{
 },{
   [{Tab="Stakers",['Address'] = "_"}] = function (msg)
     assert(Stakers[msg.Address]~=nil,"the staker does not exist")
-    local staker = Stakers[msg.Address]
+    local staker = utils.deepCopy(Stakers[msg.Address])
     staker.balance = utils.veBalance(msg.Address,msg.Timestamp)
+    
     msg.reply({
       Action="Getted",
       Tab = "Stakers",
-      Data = Stakers[msg.Address]
+      Data = staker
     })
   end
 })
@@ -247,8 +256,4 @@ Handlers.prepend("cash_flow", function (msg) return "continue" end, function (ms
 end)
 
 
-Handlers.add("test","Test",function (msg)
-  local refund, burn = utils.calUnstakeAmount("TrnCnIGq1tx8TV8NA7L2ejJJmrywtwRfq9Q7yNV6g2A", msg.Timestamp)
-  print("refund : "..refund)
-  print("burn : "..burn)
-end)
+--- ALC boost

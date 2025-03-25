@@ -262,19 +262,15 @@ Handlers.add("Cron",{
   Action = "Cron",
   From = function (from) return from == Owner or ao.id end
 },function(msg)
-  -- print("Cron")
+  print("Cron")
   assert(State.run == 1,"the pool is paused")
   if msg.Timestamp >= State.ts_latest_draw and State.ts_latest_draw > 0 and #Bets > 0 then
     if not Archive and ARCHIVE_LOCKER == false then Handlers.archive() end
   end
 
   -- dividends   
-  if State.ts_next_dividend and msg.Timestamp >= State.ts_next_dividend then
-    State.ts_next_dividend = msg.Timestamp + 24 * 60 * 60 * 1000
-    Send({
-      Target = AGENT,
-      Action = "Distribute-Dividends",
-    })
+  if State.ts_next_dividend and msg.Timestamp >= State.ts_next_dividend and DIVIDEND_LOCKER==false then
+    Handlers.distribute(State.ts_next_dividend)
   end
 
   -- gap_rewards
@@ -485,18 +481,24 @@ Handlers.archive = function()
   })
 end
 
-Handlers.distribute = function()
+Handlers.distribute = function(ts)
+  assert(ts ~= nil and type(ts) == "number" and #tostring(ts) == 13, "missed timestamp" )
+  print("distribute:"..ts)
   DIVIDEND_LOCKER = true
-  local dividends_bal = Dividends[1]
-  assert(dividends_bal>=1,"no dividends to distribute")
-  Send({
-    Target = AGENT,
-    Action = "Distribute-Dividends",
-  }).onReply(function (m)
-    print("distributed:"..m.Amount.."-"..m.Id)
+  Handlers.once("_once_distribute_"..ts,{
+    Action = "Distributed-Dividends",
+    ['Distribute-Time']=tostring(ts),
+    From = AGENT,
+  },function (m)
     Dividends = m.Data
     DIVIDEND_LOCKER = false
   end)
+  Send({
+    Target = AGENT,
+    Action = "Distribute-Dividends",
+    ['Distribute-Time'] = tostring(ts) 
+  })
+  State.ts_next_dividend = ts + 86400000
 end
 
 Handlers.add("sync-buybacks",{

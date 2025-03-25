@@ -83,7 +83,9 @@ Handlers.add('info', "Info", function(msg)
     Name = Name,
     Ticker = Ticker,
     Logo = Logo,
-    Denomination = tostring(Denomination)
+    Denomination = tostring(Denomination),
+    Holders = Holders,
+    ["Total-Supply"] = TotalSupply
   })
 end)
 
