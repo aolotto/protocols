@@ -1,5 +1,6 @@
 import inquirer from 'inquirer';
 import fs from 'fs'
+import os from 'os'
 import { readFileSync } from "node:fs";
 import { AO } from "wao"
 import { createProjectStructure,createExecutableFromProject } from '../tools/load_lua.js';
@@ -15,6 +16,7 @@ const authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
 const token_logos = ['Cbx1FcREFmDz69TnMf0BilUHAVGaz9kp3xM1fOQG9SA','HZlLK9uWlNbhDbxXXe8aPaXZPqq9PKzpdH93ol-BKis']
 const src_agent = createExecutableFromProject(createProjectStructure("agent.lua"))
 const src_pool = createExecutableFromProject(createProjectStructure("pool.lua"))
+const src_alt = createExecutableFromProject(createProjectStructure("alt.lua"))
 const src_token = createExecutableFromProject(createProjectStructure("token.lua"))
 const src_faucet = createExecutableFromProject(createProjectStructure("faucet.lua"))
 const src_buyback = createExecutableFromProject(createProjectStructure("buyback.lua"))
@@ -37,6 +39,11 @@ inquirer
     name: "paytoken_pid",
     message: "Enter the TOKEN ID used to pay for the lottery (if empty will spawn a new):",
     default : (answers)=>answers.dev?(env_dev.PAY_ID||"KCAqEdXfGoWZNhtgPRIL0yGgWlCDUl0gvHu8dnE5EJs"):(env_prod.PAY_ID||"7zH9dlMNoxprab9loshv3Y7WG45DOny_Vrq9KrXObdQ"),
+  },{
+    type: "input",
+    name: "minttoken_pid",
+    message: "Enter the TOKEN ID used to mint for the lottery (if empty will spawn a new):",
+    default : (answers)=>answers.dev?(env_dev.ALT_ID||"wZsGlaTt-i_xP_SGO7cJPCi2pSuhnSq5Hi6QbGyovy4"):(env_prod.ALT_ID||"3IYRZBvph5Xx9566RuGWdLvUHnOcG8cHXT95s1CYRBo"),
   },{
     type: "input",
     name : "agent_pid",
@@ -69,15 +76,14 @@ inquirer
     default : (answers)=>answers.dev?env_dev.STAKE_ID:env_prod.STAKE_ID,
   }])
   .then(async(answers) => {
-    const jwk = JSON.parse(readFileSync("../.aos.json").toString());
+    const jwk = JSON.parse(readFileSync(os.homedir()+"/.aos.json").toString());
     const ao = await new AO().init(jwk)
-    const signer = ao.toSigner(jwk)
     
-    let {name,dev,paytoken_pid,agent_pid,pool_pid,faucet_pid,buyback_pid,fundation_pid,stake_pid} = answers
+    let {name,dev,paytoken_pid,agent_pid,pool_pid,faucet_pid,buyback_pid,fundation_pid,stake_pid,minttoken_pid} = answers
 
     console.log("🚀Deploying ...")
 
-    // deploy PAY
+    // deploy PAY_TOKEN
     if(paytoken_pid.length !== 43){
       const pay = await ao.deploy({
         boot: true,
@@ -88,46 +94,50 @@ inquirer
           Authority : authority,
         }
       })
-      console.log("- Spawned PAY process: "+pay.pid)
+      console.log("- Spawned PAY TOKEN process: "+pay.pid)
       paytoken_pid = pay.pid
       await ao.wait(pay.pid)
+    }
+
+    // deploy MINT_TOKEN
+    if(minttoken_pid.length !== 43){
+      const mint = await ao.deploy({
+        boot: true,
+        src_data: src_alt[0],
+        fills : {NAME: "AoLottoToken", TICKER: "ALT", DENOMINATION: 12, LOGO:token_logos[0] },
+        tags: {
+          Name : `${(name||'ao-lotto')}-token${dev?"-dev":""}`,
+          Authority : authority,
+        }
+      })
+      console.log(mint)
+      console.log("- Spawned MINT TOKEN process: "+mint.pid)
+      minttoken_pid = mint.pid
+      await ao.wait(mint.pid)
     }
 
     // deploy AGENT
     if(agent_pid.length !== 43){
       const agent = await ao.deploy({
+        boot: true,
+        src_data: src_agent[0],
+        fills : {USDC_ID: paytoken_pid, ALT_ID: minttoken_pid},
         tags: {
-          Name : `${(name||'aolotto')}${dev?"-dev":""}`,
+          Name : `${(name||'aolotto-agent')}${dev?"-dev":""}`,
           Authority : authority,
-          Token : paytoken_pid,
-          Ticker : "ALT",
-          Denomination : "12"
-        },
-        loads:[{
-          data: src_token[0],
-          fills: {NAME: "AoLottoToken", TICKER: "ALT", DENOMINATION: 12, LOGO:token_logos[0] }
-        },{
-          data: src_agent[0],
-          fills: {DEFAULT_PAY_TOKEN_ID: paytoken_pid} 
-        }] 
+        }
       })
       console.log("- Spawned AGENT process: "+agent.pid)
       agent_pid = agent.pid
       await ao.wait(agent.pid)
-    } else {
-      const l_token = await ao.load({ data: src_token[0], fills : {NAME: "AoLottoToken", TICKER: "ALT", DENOMINATION: 12, LOGO:token_logos[0] }, pid: agent_pid })
-      if(l_token.err){throw(l_token.err)}
-      console.log("- Loaded token token.lua to AGENT : ",l_token?.mid)
-      const l_agent = await ao.load({ data: src_agent[0], fills :{DEFAULT_PAY_TOKEN_ID: paytoken_pid} , pid: agent_pid })
-      if(l_agent.err){throw(l_agent.err)}
-      console.log("- Loaded token agent.lua to AGENT : ",l_agent?.mid)
-    }
+    } 
+
     // deploy FAUCET
     if(agent_pid.length == 43 && faucet_pid.length !== 43){
       const faucet = await ao.deploy({
         boot: true,
         src_data: src_faucet[0],
-        fills : {AGENT : agent_pid},
+        fills : {AGENT_ID : agent_pid},
         tags: {
           Name : `${(name||'aolotto')}-faucet${dev?"-dev":""}`,
           Authority : authority,
@@ -137,10 +147,6 @@ inquirer
       console.log("- Spawned FAUCET process: "+faucet.pid)
       faucet_pid = faucet.pid
       await ao.wait(faucet.pid)
-    }else{ 
-      const { err, res, mid } = await ao.eval({ pid : faucet_pid, data : src_faucet[0], fills : {AGENT : agent_pid}})
-      if(err)throw(err)
-      console.log("- Loaded token faucet.lua to FAUCET : ",mid)
     }
 
     // deploy POOL
@@ -148,7 +154,7 @@ inquirer
       const pool = await ao.deploy({
         boot: true,
         src_data: src_pool[0],
-        fills : {AGENT : agent_pid, OPREATOR:"j0Lrrv1ltimsYnD_5f-8Fp3QKcAbUjckn7kjCZCfvhk"},
+        fills : {AGENT_ID : agent_pid, OPREATOR:"j0Lrrv1ltimsYnD_5f-8Fp3QKcAbUjckn7kjCZCfvhk"},
         tags: {
           Name : `${(name||'aolotto')}-pool${dev?"-dev":""}`,
           ['Cron-Interval']: "1-minute",
@@ -160,10 +166,6 @@ inquirer
       console.log("- Spawned POOL process: "+pool.pid)
       pool_pid = pool.pid
       await ao.wait(pool.pid)
-    }else{
-      const { err, res, mid } = await ao.eval({ pid : pool_pid, data : src_pool[0], fills : {AGENT : agent_pid}})
-      if(err)throw(err)
-      console.log("- Loaded token pool.lua to POOL : ",mid)
     }
 
     // deploy BUYBACK
@@ -171,7 +173,7 @@ inquirer
       const buyback = await ao.deploy({
         boot: true,
         src_data: src_buyback[0],
-        fills : {AGENT : agent_pid},
+        fills : {AGENT_ID : agent_pid},
         tags: {
           Name : `${(name||'aolotto')}-buyback${dev?"-dev":""}`,
           Authority : authority,
@@ -181,10 +183,6 @@ inquirer
       console.log("- Spawned BUYBACK process: "+buyback.pid)
       buyback_pid = buyback.pid
       await ao.wait(buyback.pid)
-    }else{
-      const { err, res, mid } = await ao.eval({ pid : buyback_pid, data : src_buyback[0], fills : {AGENT : agent_pid}})
-      if(err)throw(err)
-      console.log("- Loaded token buyback.lua to BUYBACK : ",mid)
     }
 
     // deploy FUNDATION
@@ -192,7 +190,7 @@ inquirer
       const fundation = await ao.deploy({
         boot: true,
         src_data: src_fundation[0],
-        fills : {AGENT : agent_pid},
+        fills : {AGENT_ID : agent_pid},
         tags: {
           Name : `${(name||'aolotto')}-fundation${dev?"-dev":""}`,
           Authority : authority,
@@ -202,10 +200,6 @@ inquirer
       console.log("- Spawned FUNDATION process: "+fundation.pid)
       fundation_pid = fundation.pid
       await ao.wait(fundation.pid)
-    }else{
-      const { err, res, mid } = await ao.eval({ pid : fundation_pid, data : src_fundation[0], fills : {AGENT : agent_pid}})
-      if(err)throw(err)
-      console.log("- Loaded token fundation.lua to FUNDATION : ",mid)
     }
 
     // deploy STAKING
@@ -214,7 +208,7 @@ inquirer
         boot: true,
         src_data: src_stake[0],
         fills : {
-          STAKE_TOKEN : agent_pid , 
+          STAKE_TOKEN : minttoken_pid , 
           YIELD_TOKEN : paytoken_pid,
           NAME : "Vote-Escrowed ALT",
           TICKER : `veALT${dev?"-dev":""}`,
@@ -229,20 +223,9 @@ inquirer
       console.log("- Spawned FUNDATION process: "+staking.pid)
       stake_pid = staking.pid
       await ao.wait(staking.pid)
-    }else{
-      const { err, res, mid } = await ao.eval({ pid : stake_pid, data : src_stake[0], fills : {
-        STAKE_TOKEN : agent_pid , 
-        YIELD_TOKEN : paytoken_pid,
-        NAME : "Vote-Escrowed ALT",
-        TICKER : `veALT${dev?"-dev":""}`,
-        DENOMINATION : "12",
-      }})
-      if(err)throw(err)
-      console.log("- Loaded token stake.lua to STAKING : ",mid)
     }
-
     // save process IDs
-    const envText = `LOTTEY_NAME=${name}\nPAY_ID=${paytoken_pid}\nAGENT_ID=${agent_pid}\nFAUCET_ID=${faucet_pid}\nPOOL_ID=${pool_pid}\nFUNDATION_ID=${fundation_pid}\nBUYBACK_ID=${buyback_pid}\nSTAKE_ID=${stake_pid}\n`;
+    const envText = `LOTTEY_NAME=${name}\nPAY_ID=${paytoken_pid}\nALT_ID=${minttoken_pid}\nAGENT_ID=${agent_pid}\nFAUCET_ID=${faucet_pid}\nPOOL_ID=${pool_pid}\nFUNDATION_ID=${fundation_pid}\nBUYBACK_ID=${buyback_pid}\nSTAKE_ID=${stake_pid}\n`;
     if(dev){
       fs.writeFileSync(".env.local", envText);
     }else{
@@ -251,15 +234,18 @@ inquirer
 
      // push those IDs to AGENT
      const data = `
-        DEFAULT_PAY_TOKEN_ID = "${paytoken_pid}"
+        USDC_ID = "${paytoken_pid}"
+        ALT_ID = "${minttoken_pid}"
         FUNDATION_ID = "${fundation_pid}"
         FAUCET_ID = "${faucet_pid}"
         BUYBACK_ID = "${buyback_pid}"
         POOL_ID = "${pool_pid}"
         STAKE_ID = "${stake_pid}"
 
+  
         Handlers.syncInfo({
           "${paytoken_pid}",
+          "${minttoken_pid}",
           "${pool_pid}",
           "${faucet_pid}",
           "${fundation_pid}",

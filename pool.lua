@@ -25,7 +25,8 @@ local initial_state = {
 }
 
 
-AGENT = AGENT or ao.env.Process.Tags['Agent'] or "<AGENT>"
+AGENT = AGENT or ao.env.Process.Tags['Agent'] or "<AGENT_ID>"
+ALT_ID = ALT_ID or "<ALT_ID>"
 OPREATOR = OPREATOR or "<OPREATOR>"
 -- TOKEN = TOKEN or ao.env.Process.Tags['Token'] or "KCAqEdXfGoWZNhtgPRIL0yGgWlCDUl0gvHu8dnE5EJs"
 PRICE = PRICE or 1000000
@@ -56,6 +57,7 @@ Dividends = Dividends or {0,0,0}
 Buybacks = Buybacks or {0,0,0}
 Participants = Participants or {}
 GapRewards = GapRewards or {}
+
 
 
 
@@ -535,30 +537,57 @@ Handlers.mintingPlus = function (timestamp)
     }
     print("distribute gap-reward")
     -- print(message)
-    Send(message).onReply(function (msg)
+    Handlers.once("_once_minting_plus_"..message['Bet-Id'],{
+      From = AGENT,
+      Action = "Minting-Plused",
+      ['Bet-Id'] = message['Bet-Id']
+    },function (m)
       MINTING_PLUS_LOCKER = false
-      local minted = msg.Data.minted
+      local minted = m.Data.minted
       -- log gap-rewards
       if not GapRewards then GapRewards = {} end
-      if not GapRewards[msg['Bet-Id']] then GapRewards[msg['Bet-Id']] = {} end
-      table.insert(GapRewards[msg['Bet-Id']],{msg["Mint-Time"],minted.total,msg.Id})
-
+      if not GapRewards[m['Bet-Id']] then GapRewards[m['Bet-Id']] = {} end
+      table.insert(GapRewards[m['Bet-Id']],{m["Mint-Time"],minted.total,m.Id})
       -- update state
       utils.update(State,{
-        minting = msg.Data.minting
+        minting = m.Data.minting
       })
       utils.increase(State.minting_plus,{minted.total,1})
-      
       -- update the bet
-      local index = tonumber(msg['Bet-Index']) or BetsIndexer[msg['Bet-Id']]
+      local index = tonumber(m['Bet-Index']) or BetsIndexer[m['Bet-Id']]
       if minted then
         if not Bets[index].mint.plus then
           Bets[index].mint.plus = {0,0} -- {total, counts}
         end
         utils.increase(Bets[index].mint.plus,{minted.total,1})
-        print("Minting plus for bet "..msg['Bet-Id'].." - at "..msg.Timestamp)
+        print("Minting plus for bet "..m['Bet-Id'].." - at "..m.Timestamp)
       end
     end)
+    Send(message)
+    -- Send(message).onReply(function (msg)
+    --   MINTING_PLUS_LOCKER = false
+    --   local minted = msg.Data.minted
+    --   -- log gap-rewards
+    --   if not GapRewards then GapRewards = {} end
+    --   if not GapRewards[msg['Bet-Id']] then GapRewards[msg['Bet-Id']] = {} end
+    --   table.insert(GapRewards[msg['Bet-Id']],{msg["Mint-Time"],minted.total,msg.Id})
+
+    --   -- update state
+    --   utils.update(State,{
+    --     minting = msg.Data.minting
+    --   })
+    --   utils.increase(State.minting_plus,{minted.total,1})
+      
+    --   -- update the bet
+    --   local index = tonumber(msg['Bet-Index']) or BetsIndexer[msg['Bet-Id']]
+    --   if minted then
+    --     if not Bets[index].mint.plus then
+    --       Bets[index].mint.plus = {0,0} -- {total, counts}
+    --     end
+    --     utils.increase(Bets[index].mint.plus,{minted.total,1})
+    --     print("Minting plus for bet "..msg['Bet-Id'].." - at "..msg.Timestamp)
+    --   end
+    -- end)
   end
 end
 

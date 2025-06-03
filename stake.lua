@@ -4,6 +4,7 @@ local json = require('json')
 STAKE_MIN_DURATION = STAKE_MIN_DURATION or 604800000 -- 7 days
 STAKE_MAX_DURATION = STAKE_MAX_DURATION or 124416000000 -- 4 years
 STAKE_TOKEN = STAKE_TOKEN or "<STAKE_TOKEN>"
+AGENT = AGENT or ao.env.Process.Tags['Agent'] or "<AGENT_ID>"
 Name = Name or "<NAME>"
 Ticker = Ticker or "<TICKER>"
 Logo = Logo or "bcwIgXwW2C1OMG8paTtDZtAVPp16cOQlvp3_qnS16eg"
@@ -112,7 +113,8 @@ Handlers.add("stake",{
   }
   local stake_notice = utils.deepCopy(tags)
   stake_notice.Action = "Stake-Notice"
-  msg.reply(stake_notice)
+  stake_notice.Target = AGENT
+  Send(stake_notice)
   local staked = utils.deepCopy(tags)
   staked.Action = "Staked"
   staked.Target = msg.Sender

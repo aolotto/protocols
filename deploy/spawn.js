@@ -1,9 +1,8 @@
 import inquirer from 'inquirer';
 import fs from 'fs'
-import os from "os"
-import path from 'node:path';
+import os from 'os'
 import { readFileSync } from "node:fs";
-import { AO } from "wao"
+import { message,createDataItemSigner,result,spawn } from '@permaweb/aoconnect';
 import { createProjectStructure,createExecutableFromProject } from '../tools/load_lua.js';
 import dotenv from "dotenv"
 
@@ -12,12 +11,12 @@ const env_dev = dotenv.parse(fs.readFileSync('.env.local'))
 const packageJSON = fs.readFileSync('package.json', 'utf-8')
 const packageData = JSON.parse(packageJSON)
 const jwk = JSON.parse(readFileSync(os.homedir()+"/.aos.json").toString());
-const ao = await new AO().init(jwk)
-const signer = ao.toSigner(jwk)
-const module = "Do_Uc2Sju_ffp6Ev0AnLVdPtot15rvMjP-a9VVaA5fM"
+const signer = createDataItemSigner(jwk)
+const module = "JArYBF-D8q2OmZ4Mok00sD2Y_6SYEQ7Hjx-6VZ_jl3g"
 const scheduler = "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA"
 const authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
 const token_logos = ['Cbx1FcREFmDz69TnMf0BilUHAVGaz9kp3xM1fOQG9SA','HZlLK9uWlNbhDbxXXe8aPaXZPqq9PKzpdH93ol-BKis']
+const src_alt = createExecutableFromProject(createProjectStructure("alt.lua"))
 const src_agent = createExecutableFromProject(createProjectStructure("agent.lua"))
 const src_pool = createExecutableFromProject(createProjectStructure("pool.lua"))
 const src_token = createExecutableFromProject(createProjectStructure("token.lua"))
@@ -25,6 +24,7 @@ const src_faucet = createExecutableFromProject(createProjectStructure("faucet.lu
 const src_buyback = createExecutableFromProject(createProjectStructure("buyback.lua"))
 const src_fundation = createExecutableFromProject(createProjectStructure("fundation.lua"))
 const src_stake = createExecutableFromProject(createProjectStructure("stake.lua"))
+
 
 
 
@@ -77,54 +77,27 @@ inquirer
   .then(async(answers) => {
     const {env,processes} = answers
     const e = env=="pord"?env_prod:env_dev
-    console.log("⏳ loading ...")
-    processes.forEach(async element => {
-      const [key,pid] = element
-      let data,fills
-      switch(key){
-        case "AGENT":
-          const paytoken_pid = e.PAY_ID || (env=="pord"?"7zH9dlMNoxprab9loshv3Y7WG45DOny_Vrq9KrXObdQ":"KCAqEdXfGoWZNhtgPRIL0yGgWlCDUl0gvHu8dnE5EJs")
-          data = src_agent[0],
-          fills = {DEFAULT_PAY_TOKEN_ID: paytoken_pid} 
-        break;
-        case "POOL":
-          data = src_pool[0]
-          fills = {AGENT:e.AGENT_ID,OPREATOR:"j0Lrrv1ltimsYnD_5f-8Fp3QKcAbUjckn7kjCZCfvhk"}
-        break;
-        case "FAUCET":
-          data = src_faucet[0]
-          fills = {AGENT:e.AGENT_ID}
-        break;
-        case "FUNDATION":
-          data = src_fundation[0]
-          fills = {AGENT:e.AGENT_ID}
-        break;
-        case "BUYBACK":
-          data = src_buyback[0]
-          fills = {AGENT:e.AGENT_ID}
-        break;
-        case "STAKE":
-          data = src_stake[0]
-          fills = {STAKE_TOKEN:e.AGENT_ID}
-        break;
-      }
-
-      const { err,mid } = await ao.load({ data,fills, pid })
-      if(err){throw(err)}
-      
-
-      const result = await ao.result({ process:pid, message:mid })
-      if(result?.Error){throw(result?.Error)}
-      if(result?.Messages?.length>0){
-        console.log("❌ faild: "+ mid + " > " + pid + " ("+key+")")
-        console.log(result?.Messages?.[0])
-      }else{
-        console.log("✅ loaded: " + mid + " > " + pid + " ("+key+")")
-      }
-
+    // console.log("⏳ loading ...")
+    // const res = await ao.deploy({ src_data : src_alt })
+    // console.log("pid : ",res)
+    const processId = await spawn({
+      // The Arweave TxID of the ao Module
+      module,
+      // The Arweave wallet address of a Scheduler Unit
+      scheduler,
+      // A signer function containing your wallet
+      signer,
+      /*
+        Refer to a Processes' source code or documentation
+        for tags that may effect its computation.
+      */
+      tags: [
+        { name: "Authority", value: "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY" },
+        { name: "Name", value: "Test" },
+      ],
     });
     
-
+    console.log(processId)
   })
   .catch((error) => {
     if (error.isTtyError) {

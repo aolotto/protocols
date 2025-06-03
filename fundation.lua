@@ -1,5 +1,5 @@
 local utils = require("modules.utils")
-AGENT = AGENT or ao.env.Process.Tags['Agent'] or "<AGENT>"
+AGENT = AGENT or ao.env.Process.Tags['Agent'] or "<AGENT_ID>"
 OPREATOR = OPREATOR or "j0Lrrv1ltimsYnD_5f-8Fp3QKcAbUjckn7kjCZCfvhk"
 STAKE_ID = STAKE_ID or "kqDiKjXCwO16RJmjJqSNDbqdMVbrCaplEh7KnUHinlA"
 WUSDC = WUSDC or "7zH9dlMNoxprab9loshv3Y7WG45DOny_Vrq9KrXObdQ"
