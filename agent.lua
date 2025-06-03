@@ -1,7 +1,19 @@
 local utils = require("modules.utils")
 local json = require('json')
 
--- data structures of initialization
+utils.initUser = function (uid)
+  if not Players[uid] then
+    Players[uid] = {
+      div = { 0, 0, 0 }, -- unpay, total dividends,paid
+      bet = { 0, 0, 0 }, -- bets: {counts,amount,tickets}
+      mint = 0, -- total mint
+      win = { 0, 0, 0 }, -- wins: {balance, increased, decreased}
+      tax = { 0, 0, 0 }, -- taxs: {balance, Increased, decreased}
+      faucet = { 0, 0}, -- facucet quota : {balance, increased}
+      stake = {0,0,0}, -- stake: { balance, total, count}
+    }
+  end
+end
 
 local initStats = function ()
   Stats = {
@@ -32,9 +44,9 @@ local initStats = function ()
 end
 if not Stats then initStats() end
 
-
 -- consts
-DEFAULT_PAY_TOKEN_ID = DEFAULT_PAY_TOKEN_ID or "<DEFAULT_PAY_TOKEN_ID>"
+USDC_ID = USDC_ID or "<USDC_ID>"
+ALT_ID = ALT_ID or "<ALT_ID>"
 FUNDATION_ID = FUNDATION_ID or "<FUNDATION_ID>"
 FAUCET_ID = FAUCET_ID or "<FAUCET_ID>"
 BUYBACK_ID = BUYBACK_ID or "<BUYBACK_ID>"
@@ -67,45 +79,40 @@ TopBettings = TopBettings or {}
 TopMintings = TopMintings or {}
 TopDividends = TopDividends or {}
 TopWinnings = TopWinnings or {}
-TokenInfo = TokenInfo or {}
 SyncedInfo = SyncedInfo or {}
 
 
--- bet_to_mint
-local function countBets(uid,quantity,pool)
-  assert(type(uid)=="string","Missed user id")
-
-  if not Players[uid] then 
-    utils.initUser(uid)
-    utils.increase(Stats,{total_players=1})
+Handlers.prepend("cash_flow", function (msg) return "continue" end, function (msg)
+  if msg.Action == "Credit-Notice" or msg.Action == "Debit-Notice" then
+    print("cashFlow")
+    if not Funds then Funds = {} end
+    if not Funds[msg.From] then 
+      Funds[msg.From] = {
+        bal=0,
+        income=0,
+        outcome=0
+      }
+    end
+    utils.increase(Funds[msg.From],{
+      bal = msg.Action == "Credit-Notice" and tonumber(msg.Quantity) or -tonumber(msg.Quantity),
+      income = msg.Action == "Credit-Notice" and tonumber(msg.Quantity) or 0,
+      outcome = msg.Action == "Debit-Notice" and tonumber(msg.Quantity) or 0
+    })
   end
-  local _tax_rate = pool and tonumber(pool['Tax-Rate']) or 0.4
-  local _limit = pool and tonumber(pool['Max-Bet']) or 100
-  local _price = pool and tonumber(pool.Price) or 1000000
+end)
+
+local function countBets(quantity,pool)
+  assert(pool~=nil,"missed pool info")
+  local _tax_rate = pool['Tax-Rate'] and tonumber(pool['Tax-Rate']) or 0.4
+  local _limit = pool['Max-Bet'] and tonumber(pool['Max-Bet']) or 100
+  local _price = pool.Price and tonumber(pool.Price) or 1000000
   local count = math.min(math.floor(utils.toNumber(quantity) / _price),_limit)
   local amount = _price * count
   local tax = amount * _tax_rate
-  utils.increase(Players[uid].bet,{count,amount,1})
-  utils.increase(Stats,{
-    total_sales_amount = amount,
-    total_tickets = 1,
-  })
-  if not Stats.dividends then Stats.dividends = {0,0,0} end
-  if not Stats.buybacks then Stats.buybacks = {0,0,0} end
-  utils.increase(Stats.dividends,{tax*0.5,tax*0.5,0})
-  utils.increase(Stats.buybacks,{tax*0.5,tax*0.5,0})
-  utils.update(Stats,{ts_latest_bet = os.time()})
-  utils.updateRanking(TopBettings,uid,Players[uid].bet[2],50) -- update rankings
-  return tostring(count), tostring(amount), tostring(tax)
+  return count, amount, tax
 end
 
-local function resetQuota()
-  local quota = (utils.toNumber(MAX_MINT) * 0.9 - utils.toNumber(TotalSupply)) * utils.toNumber(BET2MINT_QUOTA_RATE)
-  Quota = {quota,quota}
-  return Quota
-end
-
-local function countMintQuantity(count,speed)
+local function getMintQuantityFromTier(count,speed)
   local _quota_balance =  Quota[1] or 0
   if count >= 100 then
     return _quota_balance * utils.toNumber(PER_MINT_BASE_RATE) * speed * count * MINT_TIER['100']
@@ -121,344 +128,240 @@ local function countMintQuantity(count,speed)
   end
 end
 
-local function Mint(count,uid,add_buff)
-  assert(type(uid)=="string","Missed user id")
-  assert(tonumber(count)>=1,"Missed count")
-  if not Players[uid] then 
-    utils.initUser(uid)
-    utils.increase(Stats,{total_players=1})
-  end
-  local _count = utils.toNumber(count)
-  local _speed = (utils.toNumber(MAX_MINT) - utils.toNumber(TotalSupply)) / utils.toNumber(MAX_MINT)
-  local _player = Players[uid]
-  
-  local _quota_balance =  Quota[1] or 0
-  local _unit = math.max(_quota_balance * utils.toNumber(PER_MINT_BASE_RATE) * _speed,1)
-  local _MINT_TAX = utils.toNumber(MINT_TAX) or 0.2
-  
-  local _minted = math.min(countMintQuantity(_count,_speed),_quota_balance)
-  -- print("minted - "..string.format("%.0f",_minted))
+local function countMintingAmount(count)
+  assert(count>=1,"Missed count")
+  local _count = count
+  local _speed = (utils.toNumber(MAX_MINT) - utils.toNumber(TotalSupply or "0")) / utils.toNumber(MAX_MINT)
 
-  local _faucet_buff = 0
-  if _player.faucet[1]>0 and add_buff == true then
-    print("faucet buff")
-    _faucet_buff = math.min(_player.faucet[1] ,_minted)
-    utils.decrease(Players[uid].faucet,{_faucet_buff,0})
-  end
-  _minted = _minted + _faucet_buff
-  local user_minted = string.format("%.0f", _minted * (1-_MINT_TAX))
-  local fundation_minted = string.format("%.0f", _minted * _MINT_TAX)
-  local total_minted = utils.add(user_minted,fundation_minted)
-  -- decrease minting quota
-  utils.decrease(Quota,{utils.toNumber(total_minted),0})
-  -- increase total minted
-  utils.increase(Stats,{
-    total_minted_amount = utils.toNumber(total_minted),
-    total_minted_count = 1
-  })
-  -- increase player minted
-  utils.increase(Players[uid],{mint=utils.toNumber(user_minted)})
-  -- Increase total supply
-  TotalSupply = utils.add(TotalSupply,total_minted)
-  -- Increase user balance
-  if not Balances[uid] then 
-    Balances[uid] = "0"
-  end
-  Balances[uid] = utils.add(Balances[uid], user_minted)
-  -- Increase fundation balance
-  local _fundation = FUNDATION_ID or ao.id
-  if not Balances[_fundation] then 
-    Balances[_fundation] = "0"
-  end
-  Balances[_fundation] = utils.add(Balances[_fundation], fundation_minted)
-  -- updating rankings
-  utils.updateRanking(TopMintings,uid,Players[uid].mint,50) -- update rankings
-  -- return minted result
-  return total_minted, user_minted, fundation_minted, tostring(_speed), tostring(_unit), tostring(_MINT_TAX), _faucet_buff>0 and tostring(_faucet_buff) or nil
+  local _quota_balance =  Quota[1] or 0
+  local _minted = math.min(getMintQuantityFromTier(_count,_speed),_quota_balance)
+  return _minted, _speed, _minted/_count
+end
+
+local function getBuffRelease(minted,minter_id)
+  local faucet = Players[minter_id].faucet
+  return math.min(minted,faucet[1] or 0)
+end
+
+local function calNetMintingAmount(total_mint, tax_rate)
+  total_mint = total_mint or 0
+  tax_rate = tax_rate or MINT_TAX
+  local _net = math.floor(total_mint * (1 - tax_rate))
+  local _tax = math.floor(total_mint * tax_rate)
+  return _net, _tax, _net + _tax
 end
 
 
 Handlers.add("bet2mint",{
   Action="Credit-Notice",
   From = function (_from)
-    return DEFAULT_PAY_TOKEN_ID == _from
+    return USDC_ID == _from
   end,
-  Sender = function (_sender) return _sender ~= Owner and _sender ~= ao.id end,
+  Sender = function (_sender) return _sender ~= ao.id end,
   Quantity = function(_quantity,m)
-    local id = POOL_ID or m['X-Pool']
-    local price = SyncedInfo[id].Price
+    local id = m['X-Pool'] or POOL_ID 
+    local price = SyncedInfo[id].Price or "1000000"
     return tonumber(_quantity) >= tonumber(price)
   end,
   ['X-Numbers'] = "_"
 },function (msg)
-  -- assert(msg.Timestamp >= Stats.launch_time or 0,"The game is not started yet")
-  local _pay_token_id = msg.From
-  if not Funds[_pay_token_id] then Funds[_pay_token_id] = 0 end
-  utils.increase(Funds,{[_pay_token_id]=utils.toNumber(msg.Quantity)})
-  
-  local _pool_id = msg['X-Pool'] or POOL_ID
-  local _pool = SyncedInfo[_pool_id]
-  local _player = msg['X-Beneficiary'] or msg.Sender
-  local _minter = msg.Sender
+  local _usdc_id = msg.From
+  local _pool = SyncedInfo[POOL_ID]
+  local _player_id = msg['X-Beneficiary'] or msg.Sender
+  if not Players[_player_id] then 
+    utils.initUser(_player_id) 
+    utils.increase(Stats,{total_players = 1})  
+  end
+  local _minter_id = msg.Sender
+  if not Players[_minter_id] then 
+    utils.initUser(_minter_id) 
+    utils.increase(Stats,{total_players = 1})
+  end
+  local _quantity = tonumber(msg.Quantity)
 
-  local _count,_amount,_tax = countBets(_player, msg.Quantity, _pool)
-  local _message = {
+  if not Quota then
+    Quota = {0,0} -- {balance, initial}
+  end
+
+  local _count,_amount,_jackpot_tax = countBets(_quantity,_pool)
+  print("bet - "..string.format("%.0f",_quantity).." - "..string.format("%.0f",_count).." - "..string.format("%.0f",_amount).." - "..string.format("%.0f",_jackpot_tax))
+
+ 
+
+  local _mint, _speed, _unit = countMintingAmount(_count)
+  print("mint - "..string.format("%.0f",_mint).." - "..string.format("%.0f",_speed))
+
+  local _buff = getBuffRelease(_mint,_minter_id)
+  print("buff - "..string.format("%.0f",_buff))
+
+  local _net, _tax, _total = calNetMintingAmount(_mint+_buff,MINT_TAX)
+  print("net - "..string.format("%.0f",_net).." - "..string.format("%.0f",_tax).." - "..string.format("%.0f",_total))
+
+  utils.increase(Players[_player_id].bet,{_count,_amount,1})
+  utils.increase(Players[_minter_id],{mint = _total})
+  utils.increase(Stats,{
+    total_tickets = 1,
+    total_taxation = _jackpot_tax,
+    total_sales_amount = _amount,
+    total_minted_amount = _total,
+    total_minted_count = _total > 0 and 1 or 0
+  })
+  utils.increase(Stats.dividends,{_tax*0.5,_tax*0.5,0})
+  utils.increase(Stats.buybacks,{_tax*0.5,_tax*0.5,0})
+  utils.update(Stats,{ts_latest_bet = msg.Timestamp or os.time()})
+  utils.updateRanking(TopBettings,_player_id,Players[_player_id].bet[2],50)
+
+
+  local _message_save_ticket = {
     Action = "Save-Ticket",
     Count = tostring(_count),
     Amount = tostring(_amount),
-    Tax = tostring(_tax),
+    Tax = tostring(_jackpot_tax),
     Price = _pool.Price,
-    Player = _player,
-  }
-  
-  -- custom note
-  if tonumber(msg.Quantity) - _amount >= 100000 and msg['X-Note'] then
-    if utils.utf8len(msg['X-Note']) <= 64 then
-      _message.Note = msg['X-Note']
-    end
-  end
-
-  if Quota[2]==0 and utils.toNumber(TotalSupply)==0 then 
-    resetQuota() 
-    print("Quota reseted")
-  end -- minting begining by the first bet
-
-  local mint = nil
-  if Quota[1]>0 or Players[_minter].faucet[1]>0 then
-   
-    local _minted, _user_minted, _fundation_minted, _speed, _unit, _mint_tax_rate, _mint_buff = Mint(_count, _minter,true)
-    
-    if utils.toNumber(_minted) > 0 and _player == _minter then
-      mint = {
-        total = _minted,
-        unit = _unit,
-        mint_tax_rate = _mint_tax_rate,
-        speed = _speed,
-        amount = _user_minted,
-        buff = _mint_buff,
-        ticker = Ticker,
-        token = ao.id,
-        denomination = Denomination
-      }
-    end
-
-    _message.Mint = ao.id
-    _message['Mint-Total'] = _minted
-    _message['Mint-Buff'] = _mint_buff
-    _message['Mint-Speed'] = _speed
-    _message['Mint-Amount'] = _user_minted
-    _message['Mint-Fundation'] = _fundation_minted
-    _message['Mint-For'] = _minter
-    _message['Mint-Time'] = tostring(msg.Timestamp)
-  end
-  _message.Data = {
-    token = {
-      id = SyncedInfo[_pay_token_id].Id,
-      ticker = SyncedInfo[_pay_token_id].Ticker,
-      denomination = SyncedInfo[_pay_token_id].Denomination
-    },
-    minted = mint,
-    minting = {
-      quota = Quota,
-      max_mint = MAX_MINT,
-      minted = TotalSupply
-    },
-    sponsor = _player ~= msg.Sender and Sponsors[msg.Sender] or nil
-  }
-  msg.forward(_pool_id,_message)
-end)
-
-
--- facucet
-Handlers.add("add_faucet_quota",{
-  From = function (_from) return _from == FAUCET_ID and _from ~= ao.id end,
-  Action = "Add-Faucet-Quota",
-  Quantity = "%d+",
-  Account = function (_account) return _account ~= Owner and #_account == 43 and _account ~= ao.id end
-},function (msg)
-  local uid = msg.Account
-  local qty = math.min(utils.toNumber(msg.Quantity),2100000000000000)
-  if not Players[uid] then 
-    utils.initUser(uid)
-    utils.increase(Stats,{total_players=1})
-  end
-  utils.increase(Players[uid].faucet,{qty,qty})
-  utils.increase(Stats,{total_faucet_account=1})
-  msg.reply({
-    Action="Faucet-Quota-Added",
-    User = msg.User,
-    Account = msg.Account,
-    Quantity = tostring(qty)
-  })
-end)
-
-
--- querys
-Handlers.add("get-player",{
-  Action = "Get-Player",
-  Player = "_"
-},function (msg)
-  msg.reply({Data = Players[msg.Player]})
-end)
-
-Handlers.add("ranks","Ranks",function(msg)
-  local ranks = {
-    bettings = TopBettings,
-    winnings = TopWinnings,
-    mintings = TopMintings,
-    dividends = TopDividends
-  }
-  msg.reply({ Data=ranks})
-end)
-
-Handlers.add("stats","Stats",function(msg)
-  local stats = Stats
-  stats.total_supply = TotalSupply
-  stats.mint_tier = MINT_TIER
-  msg.reply({Data=stats})
-end)
-
-Handlers.add("protocols","Protocols",function (msg)
-  local details = SyncedInfo
-  details[ao.id] = {
-    Id = ao.id,
-    Ticker = Ticker,
-    Denomination = Denomination,
-    Logo = Logo
-  }
-  msg.reply({
+    Player = _player_id,
+    Target = POOL_ID,
+    ['X-Numbers'] = msg['X-Numbers'],
     Data = {
-      agent_id = ao.id,
-      pay_id = DEFAULT_PAY_TOKEN_ID,
-      pool_id = POOL_ID,
-      facuet_id = FAUCET_ID,
-      fundation_id = FUNDATION_ID,
-      buybacks_id = BUYBACK_ID,
-      stake_id = STAKE_ID,
-      owner_id = Owner,
-      details = details
+      token = {
+        id = SyncedInfo[USDC_ID].Id,
+        ticker = SyncedInfo[USDC_ID].Ticker,
+        denomination = SyncedInfo[USDC_ID].Denomination
+      },
+      minted = {
+        total = string.format("%0.f",_total),
+        mint_tax_rate = tostring(MINT_TAX),
+        speed = tostring(_speed),
+        amount = string.format("%0.f",_net),
+        buff = string.format("%0.f",_buff),
+        unit = string.format("%0.f",_unit),
+        ticker = "ALT",
+        token = ALT_ID,
+        denomination = "12"
+      },
+      minting = {
+        quota = Quota,
+        max_mint = MAX_MINT,
+        minted = TotalSupply
+      },
+      sponsor = _minter_id ~= _player_id and Sponsors[msg.Sender] or nil
     }
-  })
-end)
+  }
 
-
-
--- the tools of management
-
-Handlers.syncInfo = function(pids)
-  for i, v in ipairs(pids) do
-    Send({
-      Target = v,
-      Action = "Info"
-    }).onReply(function(msg)
-      SyncedInfo[msg.From] = msg.Tags
-      SyncedInfo[msg.From].Id = msg.From
+  if _total > 0 then
+    local mint_tags = {
+      ['Mint-ID'] = msg.Id,
+      ['Mint-For'] = _minter_id,
+      ['Mint-Type'] = "Bet2Mint",
+      ['Mint-Time'] = tostring(msg.Timestamp),
+      ['Mint-Speed'] = tostring(_speed),
+      ['Mint-Total'] = string.format("%0.f",_total),
+      ['Mint-Buff'] = string.format("%0.f",_buff),
+      ['Mint-Amount'] = string.format("%0.f",_net),
+      ['Mint-Tax'] = string.format("%0.f",_tax),
+      ['Pushed-For'] = msg.Id
+    }
+    Handlers.once("_once_minted_"..msg.Id,{
+      From = ALT_ID,
+      Action = "Minted",
+      ['Mint-ID'] = mint_tags['Mint-ID'],
+    },function (m)
+      TotalSupply = tonumber(m['Total-Supply'] or m.Data)
     end)
-  end
-end
 
-Handlers.addSponsor = function(id,name,desc,url)
-  if not Sponsors[id] then
-    Sponsors[id] = {}
-  end
-  utils.update(Sponsors[id],{
-    id = id,
-    name = name or Sponsors[id].name,
-    desc = desc or Sponsors[id].desc,
-    url = url or Sponsors[id].url
-  })
-  print("Sponsor added!")
-end
-
-
--- claim
-Handlers.appoveClaim = function(claim)
-  Handlers.once('once_claimed_'..claim.id,{
-    Action = "Debit-Notice",
-    From = DEFAULT_PAY_TOKEN_ID,
-    Recipient = claim.recipient,
-    ['X-Player'] = claim.player,
-    ['X-Transfer-Type'] = "Claim-Notice",
-    ['X-Claim-Id'] = claim.id,
-    Quantity = tostring(claim.quantity)
-  },function(m)
-    local _qty = tonumber(m.Quantity)
-    local _tax = tonumber(m['X-Tax'])
-    Claims[m['X-Claim-Id']] = nil
-    if not Funds[DEFAULT_PAY_TOKEN_ID] then Funds[DEFAULT_PAY_TOKEN_ID] = 0 end
-    utils.decrease(Funds,{[DEFAULT_PAY_TOKEN_ID]=_qty})
-    if not Stats.total_taxation then
-      Stats.total_taxation = 0
-    end
-    utils.increase(Stats,{
-      total_claimed_count = 1,
-      total_claimed_amount = tonumber(m['X-Amount']),
-      total_taxation = _tax
-    })
-    print("Appoved the Claim: "..claim.id)
-  end)
-  Send({
-    Target = DEFAULT_PAY_TOKEN_ID,
-    Action = "Transfer",
-    Quantity=string.format("%.0f",claim.quantity),
-    Recipient = claim.recipient,
-    ['X-Amount']=tostring(claim.amount),
-    ['X-Tax']=tostring(claim.tax),
-    ['X-Player']=claim.player,
-    ['X-Transfer-Type'] = "Claim-Notice",
-    ['X-Claim-Id'] = claim.id,
-    ['X-Pool'] = POOL_ID,
-    ['X-Ticker'] = SyncedInfo[DEFAULT_PAY_TOKEN_ID].Ticker,
-    ['X-Denomination'] = SyncedInfo[DEFAULT_PAY_TOKEN_ID].Denomination,
-    ['Pushed-For'] = claim.id,
-  })
-end
-Handlers.add("claim",{
-  Action = "Claim",
-  From = function (_from,m) return _from ~= ao.id and _from == m.Owner end,
-  Owner = function (_owner) return _owner ~= Owner end,
-},function(msg)
-  assert(type(DEFAULT_PAY_TOKEN_ID) =="string" and #DEFAULT_PAY_TOKEN_ID==43,"missed payment token defination")
-  local player = Players[msg.From]
-  local _rate = SyncedInfo[POOL_ID]['Tax-Rate'] and tonumber(SyncedInfo[POOL_ID]['Tax-Rate']) or 0.4
-  local _win_bal = player.win and player.win[1] or 0
-  local _tax_bal = _win_bal * _rate
-  if player.tax then
-    _tax_bal = math.max(player.tax[1],_win_bal * _rate)
-  end
-  if _win_bal > 0 and _win_bal - _tax_bal >= 1 then
-    local recipient = msg.From
-    if msg.Recipient and #msg.Recipient == 43 then
-      recipient = msg.Recipient
-    end
-    if not Claims then Claims = {} end
-    local claim = {
-      id = msg.Id,
-      amount = _win_bal,
-      tax = _tax_bal,
-      quantity = math.floor(_win_bal-_tax_bal),
-      recipient = recipient,
-      player = msg.From
+    local _message_mint = {
+      Target = ALT_ID,
+      Action = "Mint",
     }
-    Claims[msg.Id] = claim
-    utils.decrease(Players[msg.From].win,{claim.amount,0,-claim.amount})
-    utils.decrease(Players[msg.From].tax,{claim.tax,0,-claim.tax})
-    -- doClaim(claim)
-    Send({
-      Target = msg.From,
-      Action = "Claim-Applied",
-      Data = claim
-    })
+
+    for key, value in pairs(mint_tags) do
+      _message_mint[key] = value
+      _message_save_ticket[key] = value
+    end
+    
+    Send(_message_mint)
   end
+
+  Send(_message_save_ticket)
+
 end)
 
 
--- archive & draw
+Handlers.add("minting-plus",{
+  Action = "Minting-Plus",
+  From = function (_from) return _from == POOL_ID end,
+  Player = "_",
+  ['Bet-Id'] = "_",
+  ['Bet-Index'] = "%d+"
+},function (msg)
+
+  local _mint, _speed = countMintingAmount(1)
+  print("mint - "..string.format("%.0f",_mint).." - "..string.format("%.0f",_speed))
+
+  local _net, _tax, _total = calNetMintingAmount(_mint,MINT_TAX)
+  print("net - "..string.format("%.0f",_net).." - "..string.format("%.0f",_tax).." - "..string.format("%.0f",_total))
+ 
+  -- local _minted, _user_minted, _fundation_minted, _speed, _unit, _mint_tax_rate, _mint_buff = Mint(1, msg.Player)
+  local mint = {
+    total = _total,
+    unit = _mint,
+    mint_tax_rate = MINT_TAX,
+    speed = _speed,
+    amount = _mint,
+    buff = 0,
+    ticker = Ticker,
+    token = ao.id,
+    denomination = Denomination
+  }
+
+  local mint_tags = {
+    Target = ALT_ID,
+    Action = "Mint",
+    ['Mint-ID'] = msg.Id,
+    ['Mint-For'] = msg.Player,
+    ['Mint-Type'] = "GapReaward",
+    ['Mint-Time'] = tostring(msg.Timestamp),
+    ['Mint-Speed'] = tostring(_speed),
+    ['Mint-Total'] = string.format("%0.f",_total),
+    ['Mint-Buff'] = string.format("%0.f",0),
+    ['Mint-Amount'] = string.format("%0.f",_net),
+    ['Mint-Tax'] = string.format("%0.f",_tax),
+    ['Pushed-For'] = msg.Id,
+    ["Triger-Time"] = msg["Triger-Time"],
+    ['Bet-Index'] = msg['Bet-Index'],
+    ['Bet-Id'] = msg['Bet-Id'],
+  }
+
+  Handlers.once("_once_minted_"..msg.Id,{
+    From = ALT_ID,
+    Action = "Minted",
+    ['Mint-ID'] = mint_tags['Mint-ID'],
+  },function (m)
+    TotalSupply = tonumber(m['Total-Supply'] or m.Data)
+    mint_tags.Target = nil
+    mint_tags.Action = "Minting-Plused"
+    mint_tags.Data = {
+      minted = mint,
+      minting = {
+        quota = Quota,
+        max_mint = MAX_MINT,
+        minted = TotalSupply
+      }
+    }
+    msg.reply(mint_tags)
+  end)
+
+  Send(mint_tags)
+
+end)
+
+
+
+-- archive
 Handlers.add("archive",{
   From = function (_from) return _from == POOL_ID end,
   Action = "Archive"
 },function (msg)
-  resetQuota()
+  local quota = Admin.resetQuota()
   utils.increase(Stats,{total_archived_round = 1})
   msg.reply({
     Action = "Archived",
@@ -466,19 +369,21 @@ Handlers.add("archive",{
     ['Archive-Id'] = msg.Id,
     Data = {
       minting = {
-        quota = Quota,
+        quota = quota or Quota,
         max_mint = MAX_MINT,
         minted = TotalSupply
       },
       token = {
-        id = SyncedInfo[DEFAULT_PAY_TOKEN_ID].Id,
-        ticker = SyncedInfo[DEFAULT_PAY_TOKEN_ID].Ticker,
-        denomination = SyncedInfo[DEFAULT_PAY_TOKEN_ID].Denomination
+        id = SyncedInfo[USDC_ID].Id,
+        ticker = SyncedInfo[USDC_ID].Ticker,
+        denomination = SyncedInfo[USDC_ID].Denomination
       }
     }
   })
 end)
 
+
+-- draw
 Handlers.add("draw_notice",{
   From = function (_from) return _from == POOL_ID end,
   Action = "Draw-Notice"
@@ -551,52 +456,91 @@ Handlers.add("draw_notice",{
 end)
 
 
+Handlers.add("claim",{
+  Action = "Claim",
+  From = function (_from,m) return _from == m.Owner end,
+},function(msg)
+  assert(type(USDC_ID) =="string" and #USDC_ID==43,"missed payment token defination")
+  local player = Players[msg.From]
+  local _rate = SyncedInfo[POOL_ID]['Tax-Rate'] and tonumber(SyncedInfo[POOL_ID]['Tax-Rate']) or 0.4
+  local _win_bal = player.win and player.win[1] or 0
+  local _tax_bal = math.max((player.tax and player.tax[1] or 0),_win_bal * _rate)
 
-Handlers.add("minting-plus",{
-  Action = "Minting-Plus",
-  From = function (_from) return _from == POOL_ID end,
-  Player = "_",
-  ['Bet-Id'] = "_",
-  ['Bet-Index'] = "%d+"
-},function (msg)
-  local _minted, _user_minted, _fundation_minted, _speed, _unit, _mint_tax_rate, _mint_buff = Mint(1, msg.Player)
-  local mint = {
-    total = _minted,
-    unit = _unit,
-    mint_tax_rate = _mint_tax_rate,
-    speed = _speed,
-    amount = _user_minted,
-    buff = _mint_buff,
-    ticker = Ticker,
-    token = ao.id,
-    denomination = Denomination
-  }
-  local _message = {
-    Action = "Minting-Plused",
-    ['Bet-Id'] = msg['Bet-Id'],
-    ['Bet-Index'] = msg['Bet-Index'],
-    ["Triger-Time"] = msg["Triger-Time"],
-    ['Pushed-For'] = msg.Id,
-  }
-  _message.Mint = ao.id
-  _message['Mint-Total'] = _minted
-  _message['Mint-Buff'] = _mint_buff
-  _message['Mint-Speed'] = _speed
-  _message['Mint-Amount'] = _user_minted
-  _message['Mint-Fundation'] = _fundation_minted
-  _message['Mint-For'] = msg.Player
-  _message['Mint-Time'] =msg['Mint-Time'] or tostring(msg.Timestamp)
-  _message.Data = {
-    minted = mint,
-    minting = {
-      quota = Quota,
-      max_mint = MAX_MINT,
-      minted = TotalSupply
+  if _win_bal > 0 and _win_bal - _tax_bal >= 1 then
+    local recipient = msg.From
+    if msg.Recipient and #msg.Recipient == 43 then
+      recipient = msg.Recipient
+    end
+    if not Claims then Claims = {} end
+    local claim = {
+      id = msg.Id,
+      amount = _win_bal,
+      tax = _tax_bal,
+      quantity = math.floor(_win_bal-_tax_bal),
+      recipient = recipient,
+      player = msg.From
     }
-  }
-  msg.reply(_message)
+    Claims[msg.Id] = claim
+    utils.decrease(Players[msg.From].win,{claim.amount,0,-claim.amount})
+    utils.decrease(Players[msg.From].tax,{claim.tax,0,-claim.tax})
+    Send({
+      Target = msg.From,
+      Action = "Claim-Applied",
+      Data = claim
+    })
+  end
 end)
 
+-- faucet
+Handlers.add("add_faucet_quota",{
+  From = function (_from) return _from == FAUCET_ID end,
+  Action = "Add-Faucet-Quota",
+  Quantity = "%d+",
+  Account = function (_account) return _account ~= Owner and #_account == 43 end
+},function (msg)
+  local uid = msg.Account
+  local qty = math.min(utils.toNumber(msg.Quantity),2100000000000000)
+  print("add_faucet_quota:"..uid)
+  if not Players[uid] then 
+    utils.initUser(uid)
+    utils.increase(Stats,{total_players=1})
+  end
+  utils.increase(Players[uid].faucet,{qty,qty})
+  utils.increase(Stats,{total_faucet_account=1})
+  msg.reply({
+    Action="Faucet-Quota-Added",
+    User = msg.User,
+    Account = msg.Account,
+    Quantity = tostring(qty)
+  })
+end)
+
+
+Handlers.add("get-player",{
+  Action = "Get-Player",
+  Player = "_"
+},function (msg)
+  msg.reply({Data = Players[msg.Player]})
+end)
+
+Handlers.add("ranks","Ranks",function(msg)
+  local ranks = {
+    bettings = TopBettings,
+    winnings = TopWinnings,
+    mintings = TopMintings,
+    dividends = TopDividends
+  }
+  msg.reply({ Data=ranks})
+end)
+
+Handlers.add("stats","Stats",function(msg)
+  local stats = Stats
+  stats.total_supply = TotalSupply
+  stats.mint_tier = MINT_TIER
+  msg.reply({Data=stats})
+end)
+
+-- staking
 
 Handlers.add("stake_notice",{
   Action = "Stake-Notice",
@@ -634,7 +578,7 @@ Handlers.prepend("unstake_notice",function () return "continue" end,function (ms
 end)
 
 
-
+-- distribute
 Handlers.add("distribute-dividends",{
   Action="Distribute-Dividends",
   From = POOL_ID
@@ -652,14 +596,16 @@ Handlers.add("distribute-dividends",{
     -- local distribution = {}
     local distributed = 0
     local address = 0
-    for uid, value in pairs(balances) do
-      local div = unit * tonumber(value)
-      -- distribution[uid] = distribution[uid] + div
-      utils.increase(Players[uid].div,{div,div,0})
-      utils.decrease(Stats.dividends,{div,0,-div})
-      distributed = distributed + div
-      address = address + 1
-      print(uid .. " > " .. div)
+    if divedends > 0 then
+      for uid, value in pairs(balances) do
+        local div = unit * tonumber(value)
+        -- distribution[uid] = distribution[uid] + div
+        utils.increase(Players[uid].div,{div,div,0})
+        utils.decrease(Stats.dividends,{div,0,-div})
+        distributed = distributed + div
+        address = address + 1
+        print(uid .. " > " .. div)
+      end
     end
     utils.increase(Stats,{total_distributed=1})
     local no = tostring(Stats.total_distributed)
@@ -685,12 +631,12 @@ Handlers.add("claim-dividends",{
   local player = Players[msg.From]
   assert(player ~= nil, "user not exists")
   assert(player.div[1]>=1,"The claim amount must be greater than 1")
-  assert(Funds[DEFAULT_PAY_TOKEN_ID]>=player.div[1],"Insufficient balance for dividend")
+  assert(Funds[USDC_ID]>=player.div[1],"Insufficient balance for dividend")
   local divedend = math.floor(player.div[1])
   utils.decrease(Players[msg.From].div,{divedend,0,0})
 
   Handlers.once("once_disributed_"..msg.Id,{
-    From = DEFAULT_PAY_TOKEN_ID,
+    From = USDC_ID,
     Action = "Debit-Notice",
     ['X-Transfer-Type'] = "Distributed",
     ['X-Distributed-ID'] = msg.Id,
@@ -702,7 +648,7 @@ Handlers.add("claim-dividends",{
     Funds[m.From] = Funds[m.From] - _amount
   end)
   Send({
-    Target = DEFAULT_PAY_TOKEN_ID,
+    Target = USDC_ID,
     Action = "Transfer",
     Recipient = msg.From,
     Quantity = string.format("%.0f",divedend),
@@ -710,4 +656,110 @@ Handlers.add("claim-dividends",{
     ['X-Dividends-Total'] = tostring(divedend),
     ['X-Distributed-ID'] = msg.Id,
   })
+end)
+
+
+-- management
+Admin = Admin or { _VERSION = "0.1" }
+Admin.syncInfo = function(pids)
+  for i, v in ipairs(pids) do
+    Send({
+      Target = v,
+      Action = "Info"
+    }).onReply(function(msg)
+      SyncedInfo[msg.From] = msg.Tags
+      SyncedInfo[msg.From].Id = msg.From
+      print("["..msg.From.."] has been synced。")
+    end)
+  end
+end
+
+Admin.syncSupply = function (pid)
+  assert(pid~=nil,"missed pid")
+  Send({
+    Target = pid,
+    Action = "Info"
+  }).onReply(function (m)
+    TotalSupply = m['Total-Supply']
+    print("Total Supply: "..TotalSupply)
+  end)
+end
+
+Admin.resetQuota = function ()
+  local quota = (utils.toNumber(MAX_MINT) * 0.9 - utils.toNumber(TotalSupply)) * utils.toNumber(BET2MINT_QUOTA_RATE)
+  Quota = {quota,quota}
+  return Quota
+end
+
+Admin.appoveClaim = function(claim)
+  Handlers.once('once_claimed_'..claim.id,{
+    Action = "Debit-Notice",
+    From = USDC_ID,
+    Recipient = claim.recipient,
+    ['X-Player'] = claim.player,
+    ['X-Transfer-Type'] = "Claim-Notice",
+    ['X-Claim-Id'] = claim.id,
+    Quantity = tostring(claim.quantity)
+  },function(m)
+    local _qty = tonumber(m.Quantity)
+    local _tax = tonumber(m['X-Tax'])
+    Claims[m['X-Claim-Id']] = nil
+    if not Stats.total_taxation then
+      Stats.total_taxation = 0
+    end
+    utils.increase(Stats,{
+      total_claimed_count = 1,
+      total_claimed_amount = tonumber(m['X-Amount']),
+      total_taxation = _tax
+    })
+    print("Appoved the Claim: "..claim.id)
+  end)
+  Send({
+    Target = USDC_ID,
+    Action = "Transfer",
+    Quantity=string.format("%.0f",claim.quantity),
+    Recipient = claim.recipient,
+    ['X-Amount']=tostring(claim.amount),
+    ['X-Tax']=tostring(claim.tax),
+    ['X-Player']=claim.player,
+    ['X-Transfer-Type'] = "Claim-Notice",
+    ['X-Claim-Id'] = claim.id,
+    ['X-Pool'] = POOL_ID,
+    ['X-Ticker'] = SyncedInfo[USDC_ID].Ticker,
+    ['X-Denomination'] = SyncedInfo[USDC_ID].Denomination,
+    ['Pushed-For'] = claim.id,
+  })
+end
+
+
+Handlers.add("backup",{
+  From = "3IYRZBvph5Xx9566RuGWdLvUHnOcG8cHXT95s1CYRBo",
+  Action = "Backup"
+},function (msg)
+  print("type:"..type(msg.Data))
+  assert(type(msg.Data) == 'table', 'Backup data must be a table!')
+  for key, value in pairs(msg.Data) do
+    print(key)
+  end
+  TopBettings = msg.Data.TopBettings or TopBettings
+  Claims = msg.Data.Claims or Claims
+  WITHDRAW_LOCK = msg.Data.WITHDRAW_LOCK or WITHDRAW_LOCK
+  Stats = msg.Data.Stats or Stats
+  Winners = msg.Data.Winners or Winners
+  LP_ID = msg.Data.LP_ID or LP_ID
+  LP_HOLDER = msg.Data.LP_HOLDER or LP_HOLDER
+  Funds = msg.Data.Funds or Funds
+  TotalSupply = msg.Data.TotalSupply or TotalSupply
+  TopMintings = msg.Data.TopMintings or TopMintings
+  TopDividends = msg.Data.TopDividends or TopDividends
+  TokenInfo = msg.Data.TokenInfo or TokenInfo
+  Sponsors = msg.Data.Sponsors or Sponsors
+  Quota = msg.Data.Quota or Quota
+  Players = msg.Data.Players or Players
+  TopWinnings = msg.Data.TopWinnings or TopWinnings
+  SyncedInfo = msg.Data.SyncedInfo or SyncedInfo
+  CLAIM_DIVIDEND_LOCK = msg.Data.CLAIM_DIVIDEND_LOCK or CLAIM_DIVIDEND_LOCK
+
+
+  print("Backup restored successfully.")
 end)

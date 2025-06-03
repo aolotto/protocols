@@ -1,7 +1,7 @@
 -- local const = require("modules.const")
 local utils = require(".utils")
 
-if not AGENT then AGENT = '<AGENT>' end
+if not AGENT then AGENT = '<AGENT_ID>' end
 if not Manager then Manager = Owner end
 if not Members then Members = {} end
 if not Initial_Supply then Initial_Supply = 21000000000000000000 end
@@ -82,17 +82,39 @@ Handlers.add("info","Info",function(msg)
   })
 end)
 
+DAO = DAO or {}
+DAO.batchShare = function (payouts)
+  local messages = {}
+  local total = 0
+  for k, v in pairs(payouts) do
+    if Members[k] and Members[k].user_address~=nil then
+      total = total + v
+      table.insert(messages,{
+        Target = AGENT,
+        Action = "Add-Faucet-Quota",
+        Quantity = string.format("%.0f",v),
+        Account = Members[k].user_address,
+        User = Members[k].user_id
+      })
+    end
+  end
+  print(messages)
+  print("Total : " .. string.format("%.0f",total))
+  print("------------------")
+  Supplied = Supplied + total
+  for i, m in ipairs(messages) do
+    Send(m).onReply(function (msg)
+      Members[msg.User].getted = tonumber(msg.Quantity)
+      print("-")
+      print("UserID : "..msg.User)
+      print("Quantity : "..msg.Quantity)
+      print("Address : "..msg.Account)
+      print("TX : "..msg.Id)
+    end)
+  end
 
--- Handlers.manualShare = function (account,amount)
---   Send({
---     Target = AGENT,
---     Action = "Add-Faucet-Quota",
---     Quantity = amount,
---     Account = account
---   }).onReply(function(m)
---     Supplied = Supplied +tonumber(m.Quantity)
-
---   end)
-
--- end
+  if Supplied >= Initial_Supply then
+    Available = false
+  end
+end
 
