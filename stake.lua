@@ -139,7 +139,8 @@ Handlers.add("unstake",{
       Quantity = string.format("%.0f", refund),
       ['X-Transfer-Type'] = "Unstaked",
       ['X-Unstake-Amount'] = string.format("%.0f", Stakers[msg.From].amount),
-      ['X-Staker'] = msg.From
+      ['X-Staker'] = msg.From,
+      ['Pushed-For'] = msg['Pushed-For'] or msg.Id,
     }
     print(msg_stake)
     Send(msg_stake)
@@ -151,6 +152,7 @@ Handlers.add("unstake",{
       Target = STAKE_TOKEN,
       Action = "Burn",
       Quantity = string.format("%.0f", burn),
+      ['Pushed-For'] = msg['Pushed-For'] or msg.Id,
     }
     print(msg_burn)
     Send(msg_burn).onReply(function (m)
@@ -164,6 +166,13 @@ Handlers.add("unstake",{
   utils.update(State,{latest_unstake = msg.Timestamp})
   Stakers[msg.From] = nil
 
+  Send({
+    Target = AGENT,
+    Action = "Unstake-Notice",
+    Amount = string.format("%.0f", refund + burn),
+    Staker = msg.From,
+    ['Pushed-For'] = msg['Pushed-For'] or msg.Id,
+  })
 end)
 
 Handlers.add("balances", "Balances", function(msg)

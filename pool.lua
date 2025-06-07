@@ -24,11 +24,10 @@ local initial_state = {
   }
 }
 
-
 AGENT = AGENT or ao.env.Process.Tags['Agent'] or "<AGENT_ID>"
 ALT_ID = ALT_ID or "<ALT_ID>"
 OPREATOR = OPREATOR or "<OPREATOR>"
--- TOKEN = TOKEN or ao.env.Process.Tags['Token'] or "KCAqEdXfGoWZNhtgPRIL0yGgWlCDUl0gvHu8dnE5EJs"
+TOKEN = TOKEN or ao.env.Process.Tags['Token'] or "KCAqEdXfGoWZNhtgPRIL0yGgWlCDUl0gvHu8dnE5EJs"
 PRICE = PRICE or 1000000
 DIGITS = DIGITS or 3
 DRAW_DELAY = DRAW_DELAY or 86400000
@@ -234,6 +233,7 @@ Handlers.add("state","State",function(msg)
   local _state = utils.deepCopy(State)
   _state.picks = Numbers
   _state.draw_delay = DRAW_DELAY
+  _state.gap_rewards_locker = MINTING_PLUS_LOCKER
   msg.reply({ Data=_state})
 end)
 
@@ -276,11 +276,11 @@ Handlers.add("Cron",{
   end
 
   -- gap_rewards
-  if msg.Timestamp - math.max(State.ts_latest_bet,State.latest_minting_plus) >= MINTING_PLUS_DUR and #Bets > 0 and State.ts_round_start>0 and MINTING_PLUS_LOCKER==false then
-    local mint_time = math.max(State.ts_latest_bet,State.latest_minting_plus) + MINTING_PLUS_DUR
-    print("Minting plus triger ->"..msg.Timestamp.."/"..mint_time.."-> diff:".. msg.Timestamp - mint_time)
-    Handlers.mintingPlus(mint_time)
-  end
+  -- if msg.Timestamp - math.max(State.ts_latest_bet,State.latest_minting_plus) >= MINTING_PLUS_DUR and #Bets > 0 and State.ts_round_start>0 and MINTING_PLUS_LOCKER==false then
+  --   local mint_time = math.max(State.ts_latest_bet,State.latest_minting_plus) + MINTING_PLUS_DUR
+  --   print("Minting plus triger ->"..msg.Timestamp.."/"..mint_time.."-> diff:".. msg.Timestamp - mint_time)
+  --   Handlers.mintingPlus(mint_time)
+  -- end
 
   -- auto draw
   if Archive and Archive.id and Archive.archived_id and Archive.block_height ~= nil and msg['Block-Height'] - Archive.block_height >= DRAW_DIFF_BLOCKHEIGHT and DRAW_LOCKER == false then

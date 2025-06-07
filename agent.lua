@@ -82,9 +82,11 @@ TopWinnings = TopWinnings or {}
 SyncedInfo = SyncedInfo or {}
 
 
-Handlers.prepend("cash_flow", function (msg) return "continue" end, function (msg)
-  if msg.Action == "Credit-Notice" or msg.Action == "Debit-Notice" then
-    print("cashFlow")
+Handlers.prepend("cash_flow", function() return "continue" end, function (msg)
+
+  
+  if msg.Action == "Credit-Notice" then
+    print(msg.Action.." : "..msg.From.." + "..msg.Quantity)
     if not Funds then Funds = {} end
     if not Funds[msg.From] then 
       Funds[msg.From] = {
@@ -94,9 +96,24 @@ Handlers.prepend("cash_flow", function (msg) return "continue" end, function (ms
       }
     end
     utils.increase(Funds[msg.From],{
-      bal = msg.Action == "Credit-Notice" and tonumber(msg.Quantity) or -tonumber(msg.Quantity),
-      income = msg.Action == "Credit-Notice" and tonumber(msg.Quantity) or 0,
-      outcome = msg.Action == "Debit-Notice" and tonumber(msg.Quantity) or 0
+      bal = tonumber(msg.Quantity),
+      income = tonumber(msg.Quantity),
+      outcome = 0
+    })
+  elseif msg.Action=="Debit-Notice" then
+    print(msg.Action.." : "..msg.From.." - "..msg.Quantity)
+    if not Funds then Funds = {} end
+    if not Funds[msg.From] then 
+      Funds[msg.From] = {
+        bal=0,
+        income=0,
+        outcome=0
+      }
+    end
+    utils.decrease(Funds[msg.From],{
+      bal = -tonumber(msg.Quantity),
+      income = 0,
+      outcome = tonumber(msg.Quantity)
     })
   end
 end)
@@ -199,6 +216,7 @@ Handlers.add("bet2mint",{
 
   utils.increase(Players[_player_id].bet,{_count,_amount,1})
   utils.increase(Players[_minter_id],{mint = _total})
+  utils.decrease(Players[_minter_id].faucet,{_buff,0})
   utils.increase(Stats,{
     total_tickets = 1,
     total_taxation = _jackpot_tax,
@@ -206,9 +224,12 @@ Handlers.add("bet2mint",{
     total_minted_amount = _total,
     total_minted_count = _total > 0 and 1 or 0
   })
-  utils.increase(Stats.dividends,{_tax*0.5,_tax*0.5,0})
-  utils.increase(Stats.buybacks,{_tax*0.5,_tax*0.5,0})
-  utils.update(Stats,{ts_latest_bet = msg.Timestamp or os.time()})
+  utils.increase(Stats.dividends,{_jackpot_tax*0.5,_jackpot_tax*0.5,0})
+  utils.increase(Stats.buybacks,{_jackpot_tax*0.5,_jackpot_tax*0.5,0})
+  utils.update(Stats,{
+    ts_latest_bet = msg.Timestamp or os.time(),
+    prev_bet_amount = _amount,
+  })
   utils.updateRanking(TopBettings,_player_id,Players[_player_id].bet[2],50)
 
 
@@ -290,8 +311,7 @@ Handlers.add("minting-plus",{
   Action = "Minting-Plus",
   From = function (_from) return _from == POOL_ID end,
   Player = "_",
-  ['Bet-Id'] = "_",
-  ['Bet-Index'] = "%d+"
+  ['Bet-Id'] = "_"
 },function (msg)
 
   local _mint, _speed = countMintingAmount(1)
@@ -486,6 +506,7 @@ Handlers.add("claim",{
     Send({
       Target = msg.From,
       Action = "Claim-Applied",
+      ['Claim-Id'] = msg.Id,
       Data = claim
     })
   end
@@ -540,6 +561,13 @@ Handlers.add("stats","Stats",function(msg)
   msg.reply({Data=stats})
 end)
 
+Handlers.add("info","Info",function(msg)
+  msg.reply({
+    Id = ao.id,
+    Name = Name
+  })
+end)
+
 -- staking
 
 Handlers.add("stake_notice",{
@@ -561,20 +589,38 @@ Handlers.add("stake_notice",{
 end)
 
 
-Handlers.prepend("unstake_notice",function () return "continue" end,function (msg)
-  if msg.Action == "Transfer" and msg['X-Transfer-Type'] == "Unstaked" and msg.From == STAKE_ID and msg['X-Staker']~=nil and msg['X-Unstake-Amount']~=nil then
-    local _staker = msg['X-Staker']
-    print("Unstaked")
-    if not Players[_staker] then
-      utils.initUser(_staker)
-      utils.increase(Stats,{total_players=1})
-    end
-    if not Players[_staker].stake then
-      Players[_staker].stake = {0,0,0}
-    end
-    utils.decrease(Players[_staker].stake,{tonumber(msg['X-Unstake-Amount']),0,0})
-    utils.decrease(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg['X-Unstake-Amount'])})
+-- Handlers.prepend("unstake_notice",function () return "continue" end,function (msg)
+--   if msg.Action == "Transfer" and msg['X-Transfer-Type'] == "Unstaked" and msg.From == STAKE_ID and msg['X-Staker']~=nil and msg['X-Unstake-Amount']~=nil then
+--     local _staker = msg['X-Staker']
+--     print("Unstaked")
+--     if not Players[_staker] then
+--       utils.initUser(_staker)
+--       utils.increase(Stats,{total_players=1})
+--     end
+--     if not Players[_staker].stake then
+--       Players[_staker].stake = {0,0,0}
+--     end
+--     utils.decrease(Players[_staker].stake,{tonumber(msg['X-Unstake-Amount']),0,0})
+--     utils.decrease(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg['X-Unstake-Amount'])})
+--   end
+-- end)
+
+Handlers.add("unstake_notice",{
+  From = STAKE_ID,
+  Action = "Unstake-Notice",
+  Amount = "%d+",
+  Staker = "_"
+},function (msg)
+  local _staker = msg.Staker
+  if not Players[_staker] then 
+    utils.initUser(_staker)
+    utils.increase(Stats,{total_players=1})
   end
+  if not Players[_staker].stake then
+    Players[_staker].stake = {0,0,0}
+  end
+  utils.decrease(Players[_staker].stake,{tonumber(msg.Amount),0,0})
+  utils.decrease(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg.Amount)})
 end)
 
 
@@ -631,7 +677,7 @@ Handlers.add("claim-dividends",{
   local player = Players[msg.From]
   assert(player ~= nil, "user not exists")
   assert(player.div[1]>=1,"The claim amount must be greater than 1")
-  assert(Funds[USDC_ID]>=player.div[1],"Insufficient balance for dividend")
+  assert(Funds[USDC_ID].bal>=player.div[1],"Insufficient balance for dividend")
   local divedend = math.floor(player.div[1])
   utils.decrease(Players[msg.From].div,{divedend,0,0})
 
@@ -643,9 +689,14 @@ Handlers.add("claim-dividends",{
     Recipient = msg.From,
     Quantity = string.format("%.0f",divedend)
   },function (m)
+    print("once_disributed_dividends:"..msg.Id)
     local _amount = utils.toNumber(m.Quantity)
     utils.increase(Players[m.Recipient].div,{0,0,_amount})
-    Funds[m.From] = Funds[m.From] - _amount
+    utils.decrease(Funds[m.From],{
+      bal = _amount,
+      outcome = -_amount,
+      income = 0
+    })
   end)
   Send({
     Target = USDC_ID,
@@ -712,7 +763,12 @@ Admin.appoveClaim = function(claim)
       total_claimed_amount = tonumber(m['X-Amount']),
       total_taxation = _tax
     })
-    print("Appoved the Claim: "..claim.id)
+    utils.decrease(Funds[USDC_ID],{
+      bal = _qty,
+      outcome = -_qty,
+      income = 0
+    })
+    print("Appoved the Claim: "..claim.id.." > "..m.Id)
   end)
   Send({
     Target = USDC_ID,
@@ -732,34 +788,3 @@ Admin.appoveClaim = function(claim)
 end
 
 
-Handlers.add("backup",{
-  From = "3IYRZBvph5Xx9566RuGWdLvUHnOcG8cHXT95s1CYRBo",
-  Action = "Backup"
-},function (msg)
-  print("type:"..type(msg.Data))
-  assert(type(msg.Data) == 'table', 'Backup data must be a table!')
-  for key, value in pairs(msg.Data) do
-    print(key)
-  end
-  TopBettings = msg.Data.TopBettings or TopBettings
-  Claims = msg.Data.Claims or Claims
-  WITHDRAW_LOCK = msg.Data.WITHDRAW_LOCK or WITHDRAW_LOCK
-  Stats = msg.Data.Stats or Stats
-  Winners = msg.Data.Winners or Winners
-  LP_ID = msg.Data.LP_ID or LP_ID
-  LP_HOLDER = msg.Data.LP_HOLDER or LP_HOLDER
-  Funds = msg.Data.Funds or Funds
-  TotalSupply = msg.Data.TotalSupply or TotalSupply
-  TopMintings = msg.Data.TopMintings or TopMintings
-  TopDividends = msg.Data.TopDividends or TopDividends
-  TokenInfo = msg.Data.TokenInfo or TokenInfo
-  Sponsors = msg.Data.Sponsors or Sponsors
-  Quota = msg.Data.Quota or Quota
-  Players = msg.Data.Players or Players
-  TopWinnings = msg.Data.TopWinnings or TopWinnings
-  SyncedInfo = msg.Data.SyncedInfo or SyncedInfo
-  CLAIM_DIVIDEND_LOCK = msg.Data.CLAIM_DIVIDEND_LOCK or CLAIM_DIVIDEND_LOCK
-
-
-  print("Backup restored successfully.")
-end)

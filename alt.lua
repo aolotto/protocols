@@ -11,6 +11,7 @@ Handlers.remove("minting-plus")
 Handlers.remove("stake_notice")
 Handlers.remove("distribute-dividends")
 Handlers.remove("claim-dividends")
+Handlers.remove("unstake_notice")
 
 local bint = require('.bint')(256)
 --[[
@@ -310,24 +311,24 @@ Handlers.add('holders',"Holders",function(msg)
 end)
 
 
-Send({Target = "eGPZS8D1Ck_CpWxPr6JqUUJerFrODoXn7uqL_GJGnBg",Action="Backup",Time=tostring(os.time()),Data={
-  Players = Players,
-  Stats = Stats,
-  Quota = Quota,-- {balance, initial}
-  Funds = Funds,
-  Winners = Winners,
-  Sponsors = Sponsors,
-  TopBettings = TopBettings,
-  TopMintings = TopMintings,
-  TopDividends = TopDividends,
-  TopWinnings = TopWinnings,
-  TokenInfo = TokenInfo,
-  SyncedInfo = SyncedInfo,
-  Claims = Claims,
-  TotalSupply = TotalSupply,
-  LP_ID = LP_ID,
-  LP_HOLDER = LP_HOLDER,
-  WITHDRAW_LOCK = WITHDRAW_LOCK,
-  CLAIM_DIVIDEND_LOCK = CLAIM_DIVIDEND_LOCK
+-- Send({Target = "eGPZS8D1Ck_CpWxPr6JqUUJerFrODoXn7uqL_GJGnBg",Action="Backup",Time=tostring(os.time()),Data={
+--   Players = Players,
+--   Stats = Stats,
+--   Quota = Quota,-- {balance, initial}
+--   Funds = Funds,
+--   Winners = Winners,
+--   Sponsors = Sponsors,
+--   TopBettings = TopBettings,
+--   TopMintings = TopMintings,
+--   TopDividends = TopDividends,
+--   TopWinnings = TopWinnings,
+--   TokenInfo = TokenInfo,
+--   SyncedInfo = SyncedInfo,
+--   Claims = Claims,
+--   TotalSupply = TotalSupply,
+--   LP_ID = LP_ID,
+--   LP_HOLDER = LP_HOLDER,
+--   WITHDRAW_LOCK = WITHDRAW_LOCK,
+--   CLAIM_DIVIDEND_LOCK = CLAIM_DIVIDEND_LOCK
 
-}})
+-- }})
