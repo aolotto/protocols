@@ -98,7 +98,7 @@ Handlers.add("save-ticket",{
 
   -- Save the bet
   local bet = {
-    id = msg['Pushed-For'] or msg.Id,
+    id = msg['Bet-Id'] or msg['Pushed-For'] or msg.Id,
     round = State.round,
     amount = amount,
     count = count,
@@ -109,11 +109,27 @@ Handlers.add("save-ticket",{
     token = msg.Data.token,
     mint = msg.Data.minted,
     sponsor = msg.Data.sponsor,
-    note = msg.Note or nil
+    note = msg.Note or nil,
   }
+  
   table.insert(Bets,bet)
   BetsIndexer = BetsIndexer or {}
   BetsIndexer[bet.id] = #Bets
+
+  -- add gap_rewards
+
+  if msg.Data.gap_rewards then
+    local _id = msg.Data.gap_rewards.id
+    local _amt = msg.Data.gap_rewards.amount
+    local _idx = BetsIndexer[_id]
+    if _idx then
+      Bets[_idx].gap_rewards = _amt
+      Bets[_idx].bekilled =  msg.Data.gap_rewards.bekilled
+      Bets[_idx].diff_time = msg.Data.gap_rewards.diff_time
+    end
+  end
+
+  
 
   -- If the total bet amount is less than the maximum of 1000 units of bet amount or jackpot, delay the draw time
   if State.bet[2] < State.wager_limit then

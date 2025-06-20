@@ -168,6 +168,45 @@ local function calNetMintingAmount(total_mint, tax_rate)
   return _net, _tax, _net + _tax
 end
 
+local function calGapRewards(prevBet, currentBet)
+  local round_duration = 600000
+  local _mint_unit = prevBet.mint_unit or 0
+  local _diff_time = math.max(currentBet.timestamp - (prevBet and prevBet.timestamp or 0),0)
+  local _rounds = math.floor(_diff_time / round_duration)
+  local _total = 0
+  print("diff time: ".._diff_time .. " - ".. _rounds .. " round" .. "-" .. _mint_unit)
+  if _rounds>0 then
+    _total = _rounds / 2 * (2 - (_rounds - 1) * 0.0069) * _mint_unit
+  end
+  
+  -- for i = 0, _rounds - 1 do
+  --   local decay = 1 - i * 0.006
+  --   if decay < 0 then decay = 0 end  -- 防止为负
+  --   _total = _total + _mint_unit * decay
+  -- end
+
+  _total = math.min(_total, Quota[1] * 0.2)
+
+  local _killed = 0
+
+  if currentBet.count > prevBet.count then
+    _killed = _total * 0.5
+  end
+
+  return (_total - _killed), _killed, _diff_time, _mint_unit
+  -- local _gap_reward_prev = 0
+  -- if _diff_time > 600000 then
+  --   local _gap_reward_total = (_mint_unit / 600000) * _diff_time
+  --   if currentBet.count > prevBet.count then
+  --     _gap_reward_prev = _gap_reward_total * 0.5
+  --     killed = _gap_reward_total * 0.5
+  --   else
+  --     _gap_reward_prev = _gap_reward_total
+  --   end
+  -- end
+  -- return _gap_reward_prev, killed, _diff_time
+end
+
 
 Handlers.add("bet2mint",{
   Action="Credit-Notice",
@@ -182,7 +221,8 @@ Handlers.add("bet2mint",{
   end,
   ['X-Numbers'] = "_"
 },function (msg)
-  local _usdc_id = msg.From
+  local _id = msg['Pushed-For'] or msg.Id
+  print("bet2mint - ".._id.." - "..msg['X-Numbers'])
   local _pool = SyncedInfo[POOL_ID]
   local _player_id = msg['X-Beneficiary'] or msg.Sender
   if not Players[_player_id] then 
@@ -204,9 +244,8 @@ Handlers.add("bet2mint",{
   print("bet - "..string.format("%.0f",_quantity).." - "..string.format("%.0f",_count).." - "..string.format("%.0f",_amount).." - "..string.format("%.0f",_jackpot_tax))
 
  
-
   local _mint, _speed, _unit = countMintingAmount(_count)
-  print("mint - "..string.format("%.0f",_mint).." - "..string.format("%.0f",_speed))
+  print("mint - "..string.format("%.0f",_mint).." - "..string.format("%.0f",_speed).."-"..string.format("%.0f",_unit))
 
   local _buff = getBuffRelease(_mint,_minter_id)
   print("buff - "..string.format("%.0f",_buff))
@@ -214,26 +253,37 @@ Handlers.add("bet2mint",{
   local _net, _tax, _total = calNetMintingAmount(_mint+_buff,MINT_TAX)
   print("net - "..string.format("%.0f",_net).." - "..string.format("%.0f",_tax).." - "..string.format("%.0f",_total))
 
+  local _gap_reward_prev, _killed, _diff_time = calGapRewards({
+    timestamp = LatestBet and LatestBet.timestamp or os.time(),
+    count = LatestBet and LatestBet.count or 0 ,
+    mint_unit = LatestBet and LatestBet.mint_unit or 0
+  }, {
+    timestamp = msg.Timestamp or os.time(),
+    count = _count,
+    mint_unit = _unit,
+  })
+  print("gap rewards - "..string.format("%.0f",_gap_reward_prev).." - "..string.format("%.0f",_killed))
+
+  if _killed >0 then
+    _total = _total + _killed
+    _net = _net + _killed * 0.8
+    _tax = _tax + _killed * 0.2
+  end
+
+  utils.decrease(Quota,{_total, 0})
   utils.increase(Players[_player_id].bet,{_count,_amount,1})
-  utils.increase(Players[_minter_id],{mint = _total})
   utils.decrease(Players[_minter_id].faucet,{_buff,0})
   utils.increase(Stats,{
     total_tickets = 1,
     total_taxation = _jackpot_tax,
     total_sales_amount = _amount,
-    total_minted_amount = _total,
-    total_minted_count = _total > 0 and 1 or 0
   })
   utils.increase(Stats.dividends,{_jackpot_tax*0.5,_jackpot_tax*0.5,0})
   utils.increase(Stats.buybacks,{_jackpot_tax*0.5,_jackpot_tax*0.5,0})
-  utils.update(Stats,{
-    ts_latest_bet = msg.Timestamp or os.time(),
-    prev_bet_amount = _amount,
-  })
   utils.updateRanking(TopBettings,_player_id,Players[_player_id].bet[2],50)
 
-
-  local _message_save_ticket = {
+  
+  Send( {
     Action = "Save-Ticket",
     Count = tostring(_count),
     Amount = tostring(_amount),
@@ -242,6 +292,8 @@ Handlers.add("bet2mint",{
     Player = _player_id,
     Target = POOL_ID,
     ['X-Numbers'] = msg['X-Numbers'],
+    ['Bet-Id'] = _id,
+    ['Pushed-For'] = msg['Pushed-For'],
     Data = {
       token = {
         id = SyncedInfo[USDC_ID].Id,
@@ -257,20 +309,28 @@ Handlers.add("bet2mint",{
         unit = string.format("%0.f",_unit),
         ticker = "ALT",
         token = ALT_ID,
-        denomination = "12"
+        denomination = "12",
+        recipient = _minter_id,
+        killed = string.format("%0.f",_killed)
       },
       minting = {
         quota = Quota,
         max_mint = MAX_MINT,
         minted = TotalSupply
       },
-      sponsor = _minter_id ~= _player_id and Sponsors[msg.Sender] or nil
+      sponsor = _minter_id ~= _player_id and Sponsors[msg.Sender] or nil,
+      gap_rewards = {
+        id = LatestBet and LatestBet.id or nil,
+        amount = _gap_reward_prev,
+        bekilled = _killed,
+        diff_time = _diff_time,
+      }
     }
-  }
+  })
 
   if _total > 0 then
-    local mint_tags = {
-      ['Mint-ID'] = msg.Id,
+    Send({
+      ['Mint-ID'] = msg['Pushed-For'] or msg.Id,
       ['Mint-For'] = _minter_id,
       ['Mint-Type'] = "Bet2Mint",
       ['Mint-Time'] = tostring(msg.Timestamp),
@@ -279,101 +339,60 @@ Handlers.add("bet2mint",{
       ['Mint-Buff'] = string.format("%0.f",_buff),
       ['Mint-Amount'] = string.format("%0.f",_net),
       ['Mint-Tax'] = string.format("%0.f",_tax),
-      ['Pushed-For'] = msg.Id
-    }
-    Handlers.once("_once_minted_"..msg.Id,{
-      From = ALT_ID,
-      Action = "Minted",
-      ['Mint-ID'] = mint_tags['Mint-ID'],
-    },function (m)
-      TotalSupply = tonumber(m['Total-Supply'] or m.Data)
-    end)
-
-    local _message_mint = {
+      ['Mint-Killed'] = string.format("%0.f",_killed),
       Target = ALT_ID,
       Action = "Mint",
-    }
-
-    for key, value in pairs(mint_tags) do
-      _message_mint[key] = value
-      _message_save_ticket[key] = value
-    end
-    
-    Send(_message_mint)
+      ['Pushed-For'] = msg['Pushed-For']
+    })
   end
 
-  Send(_message_save_ticket)
+  if _gap_reward_prev > 0 then
+    utils.decrease(Quota,{_gap_reward_prev, 0})
+    Send({
+      Target = ALT_ID,
+      Action = "Mint",
+      ["Mint-Id"] = LatestBet.id,
+      ["Mint-For"] = LatestBet.minter,
+      ["Mint-Type"] = "GapReaward",
+      ["Mint-Time"] = tostring(msg.Timestamp),
+      ["Mint-Speed"] = tostring(LatestBet.speed or _speed),
+      ["Mint-Total"] = string.format("%0.f",_gap_reward_prev),
+      ["Mint-Buff"] = "0",
+      ["Mint-Amount"] = string.format("%0.f",_gap_reward_prev * 0.8),
+      ["Mint-Tax"] = string.format("%0.f",_gap_reward_prev * 0.2),
+      ['Pushed-For'] = LatestBet.id,
+    })
+  end
 
-end)
 
-
-Handlers.add("minting-plus",{
-  Action = "Minting-Plus",
-  From = function (_from) return _from == POOL_ID end,
-  Player = "_",
-  ['Bet-Id'] = "_"
-},function (msg)
-
-  local _mint, _speed = countMintingAmount(1)
-  print("mint - "..string.format("%.0f",_mint).." - "..string.format("%.0f",_speed))
-
-  local _net, _tax, _total = calNetMintingAmount(_mint,MINT_TAX)
-  print("net - "..string.format("%.0f",_net).." - "..string.format("%.0f",_tax).." - "..string.format("%.0f",_total))
- 
-  -- local _minted, _user_minted, _fundation_minted, _speed, _unit, _mint_tax_rate, _mint_buff = Mint(1, msg.Player)
-  local mint = {
-    total = _total,
-    unit = _mint,
-    mint_tax_rate = MINT_TAX,
+  LatestBet = {
+    id = _id,
+    player = _player_id,
+    amount = _amount,
+    count = _count,
+    timestamp = msg.Timestamp or os.time(),
+    numbers = msg['X-Numbers'],
+    minter = _minter_id,
+    mint = _mint,
     speed = _speed,
-    amount = _mint,
-    buff = 0,
-    ticker = Ticker,
-    token = ao.id,
-    denomination = Denomination
+    mint_unit = _unit
   }
 
-  local mint_tags = {
-    Target = ALT_ID,
-    Action = "Mint",
-    ['Mint-ID'] = msg.Id,
-    ['Mint-For'] = msg.Player,
-    ['Mint-Type'] = "GapReaward",
-    ['Mint-Time'] = tostring(msg.Timestamp),
-    ['Mint-Speed'] = tostring(_speed),
-    ['Mint-Total'] = string.format("%0.f",_total),
-    ['Mint-Buff'] = string.format("%0.f",0),
-    ['Mint-Amount'] = string.format("%0.f",_net),
-    ['Mint-Tax'] = string.format("%0.f",_tax),
-    ['Pushed-For'] = msg.Id,
-    ["Triger-Time"] = msg["Triger-Time"],
-    ['Bet-Index'] = msg['Bet-Index'],
-    ['Bet-Id'] = msg['Bet-Id'],
-  }
-
-  Handlers.once("_once_minted_"..msg.Id,{
-    From = ALT_ID,
-    Action = "Minted",
-    ['Mint-ID'] = mint_tags['Mint-ID'],
-  },function (m)
-    TotalSupply = tonumber(m['Total-Supply'] or m.Data)
-    mint_tags.Target = nil
-    mint_tags.Action = "Minting-Plused"
-    mint_tags.Data = {
-      minted = mint,
-      minting = {
-        quota = Quota,
-        max_mint = MAX_MINT,
-        minted = TotalSupply
-      }
-    }
-    msg.reply(mint_tags)
-  end)
-
-  Send(mint_tags)
 
 end)
 
+Handlers.add("minted",{
+  From = ALT_ID,
+  Action = "Minted",
+},function (msg)
+  TotalSupply = tonumber(msg['Total-Supply'] or msg.Data)
+  utils.increase(Players[msg["Mint-For"]],{mint = tonumber(msg['Mint-Total'])})
+  utils.increase(Stats,{
+    total_minted_amount = tonumber(msg['Mint-Total']),
+    total_minted_count = 1
+  })
+  utils.updateRanking(TopMintings,msg["Mint-For"],Players[msg["Mint-For"]].mint,50)
+end)
 
 
 -- archive
@@ -381,7 +400,34 @@ Handlers.add("archive",{
   From = function (_from) return _from == POOL_ID end,
   Action = "Archive"
 },function (msg)
+  local _gap_reward_prev, _killed, _diff_time = calGapRewards({
+    timestamp = LatestBet.timestamp,
+    count = LatestBet.count,
+    mint_unit = LatestBet.mint_unit
+  }, {
+    timestamp = msg.Timestamp or os.time(),
+    count = LatestBet.count,
+    mint_unit = LatestBet.mint_unit
+  })
+  if _gap_reward_prev > 0 then
+    utils.decrease(Quota,{_gap_reward_prev, 0})
+    Send({
+      Target = ALT_ID,
+      Action = "Mint",
+      ["Mint-Id"] = LatestBet.id,
+      ["Mint-For"] = LatestBet.minter,
+      ["Mint-Type"] = "GapReaward",
+      ["Mint-Time"] = tostring(msg.Timestamp),
+      ["Mint-Speed"] = tostring(LatestBet.speed),
+      ["Mint-Total"] = string.format("%0.f",_gap_reward_prev),
+      ["Mint-Buff"] = "0",
+      ["Mint-Amount"] = string.format("%0.f",_gap_reward_prev * 0.8),
+      ["Mint-Tax"] = string.format("%0.f",_gap_reward_prev * 0.2),
+      ['Pushed-For'] = LatestBet.id,
+    })
+  end
   local quota = Admin.resetQuota()
+  LatestBet = nil
   utils.increase(Stats,{total_archived_round = 1})
   msg.reply({
     Action = "Archived",
@@ -588,22 +634,6 @@ Handlers.add("stake_notice",{
   utils.increase(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg.Quantity)})
 end)
 
-
--- Handlers.prepend("unstake_notice",function () return "continue" end,function (msg)
---   if msg.Action == "Transfer" and msg['X-Transfer-Type'] == "Unstaked" and msg.From == STAKE_ID and msg['X-Staker']~=nil and msg['X-Unstake-Amount']~=nil then
---     local _staker = msg['X-Staker']
---     print("Unstaked")
---     if not Players[_staker] then
---       utils.initUser(_staker)
---       utils.increase(Stats,{total_players=1})
---     end
---     if not Players[_staker].stake then
---       Players[_staker].stake = {0,0,0}
---     end
---     utils.decrease(Players[_staker].stake,{tonumber(msg['X-Unstake-Amount']),0,0})
---     utils.decrease(Stats,{total_staked_count=1, total_staked_amount=tonumber(msg['X-Unstake-Amount'])})
---   end
--- end)
 
 Handlers.add("unstake_notice",{
   From = STAKE_ID,

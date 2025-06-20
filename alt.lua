@@ -226,14 +226,12 @@ Handlers.add('mint', {
   local from = msg['Mint-For'] or msg.From
   local tax = msg['Mint-Tax'] or "0"
 
- 
-  
   assert(type(quantity) == 'string', 'Quantity is required!')
   assert(bint(0) < bint(quantity), 'Quantity must be greater than zero!')
   assert(utils.subtract(MAX_MINT,TotalSupply)>=bint(total),"Minted amount exceeds total supply.")
   -- -- print("mint"..utils.subtract(MAX_MINT,TotalSupply))
 
-  print("mint: ".. total .. " - " .. quantity .. " - " .. from .. " - " .. tax)
+  -- print("mint: ".. total .. " - " .. quantity .. " - " .. from .. " - " .. tax)
 
   if not Balances[from] then
     Balances[from] = "0"
@@ -248,6 +246,9 @@ Handlers.add('mint', {
   TotalSupply = utils.add(TotalSupply, quantity)
 
   if bint(tax) > bint(0) then
+    if not Balances[FUNDATION_ID] then
+      Balances[FUNDATION_ID] = "0"
+    end
     Balances[FUNDATION_ID] = utils.add(Balances[FUNDATION_ID], tax)
     TotalSupply = utils.add(TotalSupply, tax)
   end
@@ -256,17 +257,14 @@ Handlers.add('mint', {
     Target = msg.From,
     Action = "Minted",
     Data = TotalSupply,
-    ['Mint-ID'] = msg['Mint-ID'] or msg.Id,
-    ['Mint-For'] = msg['Mint-For'] or msg.From,
-    ['Mint-Time'] = msg['Mint-Time'] or tostring(msg.Timestamp),
-    ['Mint-Speed'] = msg['Mint-Speed'],
-    ['Mint-Total'] = msg['Mint-Total'] or msg.Quantity,
-    ['Mint-Buff'] = msg['Mint-Buff'],
-    ['Mint-Amount'] = msg['Mint-Amount'] or msg.Quantity,
-    ['Mint-Tax'] = tax,
-    ['Pushed-For'] = msg['Pushed-For'] or msg.Id,
-    ['Mint-Type'] = msg['Mint-Type']
   }
+
+  for tagName, tagValue in pairs(msg) do
+    -- Tags beginning with "X-" are forwarded
+    if string.sub(tagName, 1, 5) == "Mint-" then
+      tags[tagName] = tagValue
+    end
+  end
 
   Send(tags)
 
