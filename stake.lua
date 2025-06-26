@@ -9,9 +9,11 @@ Name = Name or "<NAME>"
 Ticker = Ticker or "<TICKER>"
 Logo = Logo or "bcwIgXwW2C1OMG8paTtDZtAVPp16cOQlvp3_qnS16eg"
 Denomination = Denomination or "<DENOMINATION>"
+ALC_OG_ID = ALC_OG_ID or ""
 
 
 Stakers = Stakers or {} -- key: userAddress val: {amount=100,start_time = 1741059382183, locked_time = 2*366*24*60*60*1000}
+Boosts = Boosts or {} -- key: userAddress val: {amount=100,start_time = 1741059382183, locked_time = 2*366*24*60*60*1000}
 State = State or {
   stake_amount = {0,0}, -- {balance,total},
   stakers = 0,
@@ -48,7 +50,9 @@ utils.veBalance = function(uid, ts)
       return '0'
   end
 
-  local result = user.amount * math.min(left_time / STAKE_MAX_DURATION,1)
+  local boosted = utils.calBoost(uid)
+
+  local result = user.amount * math.min(left_time / STAKE_MAX_DURATION,1) * boosted
   return string.format("%.0f", result)
 end
 
@@ -76,6 +80,15 @@ utils.calUnstakeAmount = function (uid,ts)
   local staker = Stakers[uid]
   local r = math.min((ts - staker.start_time) / staker.locked_time,1)
   return math.floor(staker.amount * r), math.floor(staker.amount * (1-r))
+end
+
+utils.calBoost = function (uid)
+  local amount = Boosts[uid] or 0
+  if amount >= 1 then
+    return 1.2
+  else
+    return 1
+  end
 end
 
 Handlers.add("stake",{
@@ -235,6 +248,7 @@ Handlers.add("get",{
   [{Tab="Stakers",['Address'] = "_"}] = function (msg)
     assert(Stakers[msg.Address]~=nil,"the staker does not exist")
     local staker = utils.deepCopy(Stakers[msg.Address])
+    staker.boosted = utils.calBoost(msg.Address)
     staker.balance = utils.veBalance(msg.Address,msg.Timestamp)
     
     msg.reply({
@@ -268,3 +282,57 @@ end)
 
 
 --- ALC boost
+
+Handlers.add("boost",{
+  From = ALC_OG_ID,
+  Action = "Credit-Notice",
+  ["X-Transfer-Type"] = "Boost",
+  Quantity = "%d+",
+},function (msg)
+  print("boost:"..msg.Quantity.." from "..msg.Sender)
+  assert(tonumber(msg.Quantity)>=1,"The boost amount must be greater than or equal to 1")
+  if not Boosts then
+    Boosts = {}
+  end
+  if not Boosts[msg.Sender] then
+    Boosts[msg.Sender] = 0
+    utils.increase(State,{boosted_address = 1})
+  end
+  Boosts[msg.Sender] = Boosts[msg.Sender] + tonumber(msg.Quantity)
+  utils.increase(State,{boosted_amount = tonumber(msg.Quantity)})
+
+  print("Boosts["..msg.Sender.."]="..Boosts[msg.Sender])
+end)
+
+-- Handlers.add("unboost",{
+--   Action = "Unboost",
+-- },function (msg)
+--   assert(Boosts[msg.From]~=nil,"Boost not exist!")
+--   assert(Boosts[msg.From] >= 0, "Insufficient amount")
+--   local amount = Boosts[msg.From]
+--   if amount >= 1 then
+--     print("unboost:"..amount)
+--     local msg_boost = {
+--       Target = ALC_OG_ID,
+--       Action = "Transfer",
+--       Recipient = msg.From,
+--       ['X-Transfer-Type'] = "Unboost",
+--       Quantity = string.format("%.0f", amount),
+--       ['Pushed-For'] = msg['Pushed-For'] or msg.Id,
+--     }
+--     print(msg_boost)
+--     Send(msg_boost)
+--     Boosts[msg.From] = nil
+--     utils.decrease(State,{boosted_address = 1})
+--   end
+-- end)
+
+
+-- Handlers.add("unboosted",{
+--   From = ALC_OG_ID,
+--   Action = "Debit-Notice",
+--   ["X-Transfer-Type"] = "Unboost",
+--   Quantity = "%d+",
+-- },function (msg)
+--   utils.decrease(State,{boosted_amount = tonumber(msg.Quantity)})
+-- end)
