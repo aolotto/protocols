@@ -178,12 +178,6 @@ local function calGapRewards(prevBet, currentBet)
   if _rounds>0 then
     _total = _rounds / 2 * (2 - (_rounds - 1) * 0.0069) * _mint_unit
   end
-  
-  -- for i = 0, _rounds - 1 do
-  --   local decay = 1 - i * 0.006
-  --   if decay < 0 then decay = 0 end  -- 防止为负
-  --   _total = _total + _mint_unit * decay
-  -- end
 
   _total = math.min(_total, Quota[1] * 0.2)
 
@@ -194,17 +188,6 @@ local function calGapRewards(prevBet, currentBet)
   end
 
   return (_total - _killed), _killed, _diff_time, _mint_unit
-  -- local _gap_reward_prev = 0
-  -- if _diff_time > 600000 then
-  --   local _gap_reward_total = (_mint_unit / 600000) * _diff_time
-  --   if currentBet.count > prevBet.count then
-  --     _gap_reward_prev = _gap_reward_total * 0.5
-  --     killed = _gap_reward_total * 0.5
-  --   else
-  --     _gap_reward_prev = _gap_reward_total
-  --   end
-  -- end
-  -- return _gap_reward_prev, killed, _diff_time
 end
 
 

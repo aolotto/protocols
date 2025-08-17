@@ -304,35 +304,3 @@ Handlers.add("boost",{
   print("Boosts["..msg.Sender.."]="..Boosts[msg.Sender])
 end)
 
--- Handlers.add("unboost",{
---   Action = "Unboost",
--- },function (msg)
---   assert(Boosts[msg.From]~=nil,"Boost not exist!")
---   assert(Boosts[msg.From] >= 0, "Insufficient amount")
---   local amount = Boosts[msg.From]
---   if amount >= 1 then
---     print("unboost:"..amount)
---     local msg_boost = {
---       Target = ALC_OG_ID,
---       Action = "Transfer",
---       Recipient = msg.From,
---       ['X-Transfer-Type'] = "Unboost",
---       Quantity = string.format("%.0f", amount),
---       ['Pushed-For'] = msg['Pushed-For'] or msg.Id,
---     }
---     print(msg_boost)
---     Send(msg_boost)
---     Boosts[msg.From] = nil
---     utils.decrease(State,{boosted_address = 1})
---   end
--- end)
-
-
--- Handlers.add("unboosted",{
---   From = ALC_OG_ID,
---   Action = "Debit-Notice",
---   ["X-Transfer-Type"] = "Unboost",
---   Quantity = "%d+",
--- },function (msg)
---   utils.decrease(State,{boosted_amount = tonumber(msg.Quantity)})
--- end)
